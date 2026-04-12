@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Local App Testing Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 1.1rem;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        
+        .status-online {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-testing {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e7ff;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            color: #333;
+        }
+        
+        .test-results {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .error-analysis {
+            background: #2c1810;
+            border: 2px solid #d63384;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 15px;
+            color: #fff;
+        }
+        
+        .error-title {
+            color: #ff6b6b;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .error-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 4px solid #ff6b6b;
+        }
+        
+        .error-section h4 {
+            color: #ffa8a8;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .error-details {
+            background: #1a1a1a;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.85rem;
+            border: 1px solid #444;
+            margin: 8px 0;
+        }
+        
+        .suggestion-box {
+            background: #0f3460;
+            border: 2px solid #4dabf7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+            color: #e3f2fd;
+        }
+        
+        .suggestion-title {
+            color: #4dabf7;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .fix-steps {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .fix-steps li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(77, 171, 247, 0.2);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        
+        .fix-steps li:last-child {
+            border-bottom: none;
+        }
+        
+        .step-number {
+            background: #4dabf7;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        
+        .url-list {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .url-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .url-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .url-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .url-link:hover {
+            text-decoration: underline;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .feature-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .feature-item:hover {
+            border-color: #667eea;
+            background: #e3f2fd;
+        }
+        
+        .feature-item.active {
+            border-color: #667eea;
+            background: #e3f2fd;
+        }
+        
+        .feature-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .feature-desc {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .performance-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+        
+        .close:hover {
+            color: #333;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .payload-builder {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .payload-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: end;
+        }
+
+        .json-preview {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9rem;
+            margin-top: 10px;
+            border: 1px solid #444;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e7ff;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Enhanced Testing Dashboard</h1>
+            <p>Advanced diagnostics for API errors and authentication issues</p>
+        </div>
+
+        <div class="grid">
+            <!-- Server Configuration -->
+            <div class="card">
+                <h3>⚙️ Server Configuration</h3>
+                <span id="serverStatus" class="status-badge status-offline">Server Offline</span>
+                
+                <div class="form-group">
+                    <label for="frontendUrl">Frontend URL:</label>
+                    <input type="text" id="frontendUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+                </div>
+                
+                <div class="form-group">
+                    <label for="backendUrl">Backend URL:</label>
+                    <input type="text" id="backendUrl" value="http://localhost:5000" placeholder="http://localhost:5000">
+                </div>
+                
+                <button class="btn" onclick="testServerConnection()">
+                    <span id="testBtnText">Test Connection</span>
+                </button>
+                <button class="btn btn-success" onclick="openApp()">Open App</button>
+                <button class="btn btn-warning" onclick="showStartupGuide()">Setup Guide</button>
+            </div>
+
+            <!-- Enhanced Auth Testing -->
+            <div class="card">
+                <h3>🔐 Authentication Deep Diagnostics</h3>
+                <p style="margin-bottom: 15px; color: #666;">Advanced testing for registration 400 errors</p>
+                
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab('simple')">Simple Test</button>
+                    <button class="tab" onclick="switchTab('advanced')">Advanced</button>
+                    <button class="tab" onclick="switchTab('builder')">Payload Builder</button>
+                </div>
+
+                <!-- Simple Test Tab -->
+                <div id="simple-tab" class="tab-content active">
+                    <button class="btn" onclick="quickAuthTest()">🚀 Quick Auth Test</button>
+                    <button class="btn btn-success" onclick="detailedAuthTest()">🔍 Detailed Analysis</button>
+                    <button class="btn btn-warning" onclick="validateAuthEndpoints()">✅ Validate Endpoints</button>
+                </div>
+
+                <!-- Advanced Test Tab -->
+                <div id="advanced-tab" class="tab-content">
+                    <div class="form-group">
+                        <label for="testEmail">Test Email:</label>
+                        <input type="email" id="testEmail" value="" placeholder="test@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="testPassword">Test Password:</label>
+                        <input type="password" id="testPassword" value="testpass123" placeholder="Password">
+                    </div>
+                    <div class="form-group">
+                        <label for="testName">Test Name:</label>
+                        <input type="text" id="testName" value="Test User" placeholder="Full Name">
+                    </div>
+                    <button class="btn" onclick="customAuthTest()">Test with Custom Data</button>
+                </div>
+
+                <!-- Payload Builder Tab -->
+                <div id="builder-tab" class="tab-content">
+                    <div class="payload-builder">
+                        <h4>Build Registration Payload:</h4>
+                        <div id="payloadFields">
+                            <div class="payload-row">
+                                <input type="text" placeholder="Field name" value="email">
+                                <input type="text" placeholder="Field value" value="test@example.com">
+                                <button class="btn btn-small btn-danger" onclick="removeField(this)">×</button>
+                            </div>
+                            <div class="payload-row">
+                                <input type="text" placeholder="Field name" value="password">
+                                <input type="text" placeholder="Field value" value="testpass123">
+                                <button class="btn btn-small btn-danger" onclick="removeField(this)">×</button>
+                            </div>
+                            <div class="payload-row">
+                                <input type="text" placeholder="Field name" value="name">
+                                <input type="text" placeholder="Field value" value="Test User">
+                                <button class="btn btn-small btn-danger" onclick="removeField(this)">×</button>
+                            </div>
+                        </div>
+                        <button class="btn btn-small" onclick="addField()">+ Add Field</button>
+                        <div class="json-preview" id="jsonPreview"></div>
+                        <button class="btn" onclick="testCustomPayload()">Test Custom Payload</button>
+                    </div>
+                </div>
+
+                <div id="authResults" class="test-results" style="display: none;"></div>
+                <div id="errorAnalysis" style="display: none;"></div>
+            </div>
+
+            <!-- Error Pattern Analysis -->
+            <div class="card">
+                <h3>🔍 Error Pattern Analysis</h3>
+                <p style="margin-bottom: 15px; color: #666;">Analyze common 400 error patterns</p>
+                
+                <button class="btn" onclick="analyzeCommon400Errors()">Analyze Common 400s</button>
+                <button class="btn btn-success" onclick="testValidationErrors()">Test Validation</button>
+                <button class="btn btn-warning" onclick="testDuplicateUser()">Test Duplicates</button>
+                
+                <div id="patternResults" class="test-results" style="display: none;"></div>
+            </div>
+
+            <!-- Request Inspector -->
+            <div class="card">
+                <h3>🕵️ Request Inspector</h3>
+                <p style="margin-bottom: 15px; color: #666;">Inspect actual requests and responses</p>
+                
+                <div class="form-group">
+                    <label for="inspectEndpoint">Endpoint to inspect:</label>
+                    <input type="text" id="inspectEndpoint" value="/api/auth/register" placeholder="/api/auth/register">
+                </div>
+                
+                <button class="btn" onclick="inspectRequest()">🔍 Inspect Request</button>
+                <button class="btn btn-success" onclick="compareWithWorking()">📊 Compare</button>
+                <button class="btn btn-warning" onclick="captureHeaders()">📋 Capture Headers</button>
+                
+                <div id="inspectorResults" class="test-results" style="display: none;"></div>
+            </div>
+
+            <!-- App Navigation -->
+            <div class="card">
+                <h3>🧭 App Navigation</h3>
+                <p style="margin-bottom: 15px; color: #666;">Quick access to different parts of your app</p>
+                
+                <div class="url-list" id="appUrls">
+                    <div class="url-item">
+                        <a href="#" class="url-link" data-url="/">🏠 Landing Page</a>
+                        <button class="btn btn-small" onclick="openUrl('/')">Open</button>
+                    </div>
+                    <div class="url-item">
+                        <a href="#" class="url-link" data-url="/login">🔐 Login</a>
+                        <button class="btn btn-small" onclick="openUrl('/login')">Open</button>
+                    </div>
+                    <div class="url-item">
+                        <a href="#" class="url-link" data-url="/register">📝 Register</a>
+                        <button class="btn btn-small" onclick="openUrl('/register')">Open</button>
+                    </div>
+                    <div class="url-item">
+                        <a href="#" class="url-link" data-url="/dashboard">📊 Dashboard</a>
+                        <button class="btn btn-small" onclick="openUrl('/dashboard')">Open</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Monitor -->
+            <div class="card">
+                <h3>📈 Performance Monitor</h3>
+                <div class="performance-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="responseTime">-</div>
+                        <div class="stat-label">Response Time</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="requests">0</div>
+                        <div class="stat-label">Requests</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="errors">0</div>
+                        <div class="stat-label">Errors</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="status400">0</div>
+                        <div class="stat-label">400 Errors</div>
+                    </div>
+                </div>
+                
+                <button class="btn" onclick="startMonitoring()">Start Monitoring</button>
+                <button class="btn btn-danger" onclick="stopMonitoring()">Stop</button>
+                <button class="btn btn-success" onclick="resetStats()">Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Startup Guide Modal -->
+    <div id="startupModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2>🚀 Local Setup Guide</h2>
+            <div style="margin-top: 20px;">
+                <h3>Backend Setup:</h3>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                    <pre style="margin: 0; font-size: 0.9rem;">cd backend
+npm install
+npm run dev</pre>
+                </div>
+                
+                <h3>Frontend Setup:</h3>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                    <pre style="margin: 0; font-size: 0.9rem;">cd frontend
+npm install
+npm run dev</pre>
+                </div>
+                
+                <h3>Environment Variables:</h3>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                    <pre style="margin: 0; font-size: 0.9rem;"># Backend .env
+MONGODB_URI=mongodb://localhost:27017/ai-content-platform
+JWT_SECRET=your-jwt-secret
+PORT=5000
+
+# Frontend .env.local
+NEXT_PUBLIC_API_URL=http://localhost:5000/api</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let monitoringInterval = null;
+        let requestCount = 0;
+        let errorCount = 0;
+        let status400Count = 0;
+        let startTime = Date.now();
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            generateUniqueEmail();
+            updatePayloadPreview();
+            logResult('🎯 Enhanced testing dashboard loaded', 'authResults');
+            logResult('💡 Focus: Registration 400 error diagnostics', 'authResults');
+        });
+
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+
+        // Generate unique email for testing
+        function generateUniqueEmail() {
+            const timestamp = Date.now();
+            document.getElementById('testEmail').value = `test${timestamp}@example.com`;
+        }
+
+        // Server connection test
+        async function testServerConnection() {
+            const btn = document.getElementById('testBtnText');
+            const status = document.getElementById('serverStatus');
+            
+            btn.innerHTML = '<span class="loading"></span>Testing...';
+            
+            const backendUrl = document.getElementById('backendUrl').value;
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${backendUrl}/api/health`);
+                const responseTime = Date.now() - startTime;
+                
+                if (response.ok) {
+                    status.className = 'status-badge status-online';
+                    status.textContent = 'Server Online';
+                    document.getElementById('responseTime').textContent = `${responseTime}ms`;
+                } else {
+                    status.className = 'status-badge status-offline';
+                    status.textContent = 'Server Issues';
+                }
+                
+            } catch (error) {
+                status.className = 'status-badge status-offline';
+                status.textContent = 'Connection Error';
+            }
+            
+            btn.textContent = 'Test Connection';
+        }
+
+        // Quick auth test
+        async function quickAuthTest() {
+            generateUniqueEmail();
+            const baseUrl = document.getElementById('backendUrl').value;
+            
+            logResult('🚀 Running quick authentication test...', 'authResults');
+            
+            try {
+                await testRegistrationEndpoint(baseUrl, {
+                    email: document.getElementById('testEmail').value,
+                    password: 'testpass123',
+                    name: 'Test User'
+                });
+            } catch (error) {
+                logResult(`❌ Quick test failed: ${error.message}`, 'authResults');
+            }
+        }
+
+        // Detailed auth test with comprehensive analysis
+        async function detailedAuthTest() {
+            const baseUrl = document.getElementById('backendUrl').value;
+            
+            logResult('🔍 Running detailed authentication analysis...', 'authResults');
+            
+            // Test multiple scenarios
+            const testCases = [
+                {
+                    name: 'Standard Registration',
+                    payload: {
+                        email: `test${Date.now()}@example.com`,
+                        password: 'testpass123',
+                        name: 'Test User'
+                    }
+                },
+                {
+                    name: 'Missing Email',
+                    payload: {
+                        password: 'testpass123',
+                        name: 'Test User'
+                    }
+                },
+                {
+                    name: 'Invalid Email',
+                    payload: {
+                        email: 'invalid-email',
+                        password: 'testpass123',
+                        name: 'Test User'
+                    }
+                },
+                {
+                    name: 'Short Password',
+                    payload: {
+                        email: `test${Date.now() + 1}@example.com`,
+                        password: '123',
+                        name: 'Test User'
+                    }
+                },
+                {
+                    name: 'Missing Name',
+                    payload: {
+                        email: `test${Date.now() + 2}@example.com`,
+                        password: 'testpass123'
+                    }
+                }
+            ];
+
+            for (const testCase of testCases) {
+                logResult(`→ Testing: ${testCase.name}`, 'authResults');
+                await testRegistrationEndpoint(baseUrl, testCase.payload, testCase.name);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Rate limiting
+            }
+            
+            logResult('✅ Detailed analysis completed', 'authResults');
+        }
+
+        // Test registration endpoint with detailed analysis
+        async function testRegistrationEndpoint(baseUrl, payload, testName = 'Registration Test') {
+            requestCount++;
+            document.getElementById('requests').textContent = requestCount;
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${baseUrl}/api/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const responseTime = Date.now() - startTime;
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = { raw: responseText };
+                }
+                
+                logResult(`📊 ${testName} Results:`, 'authResults');
+                logResult(`Status: ${response.status} ${response.statusText}`, 'authResults');
+                logResult(`Response Time: ${responseTime}ms`, 'authResults');
+                logResult(`Headers: ${JSON.stringify(Object.fromEntries(response.headers), null, 2)}`, 'authResults');
+                logResult(`Payload Sent: ${JSON.stringify(payload, null, 2)}`, 'authResults');
+                logResult(`Response: ${JSON.stringify(responseData, null, 2)}`, 'authResults');
+                
+                if (response.status === 400) {
+                    status400Count++;
+                    document.getElementById('status400').textContent = status400Count;
+                    await analyze400Error(responseData, payload, testName);
+                } else if (!response.ok) {
+                    errorCount++;
+                    document.getElementById('errors').textContent = errorCount;
+                }
+                
+                document.getElementById('responseTime').textContent = `${responseTime}ms`;
+                
+            } catch (error) {
+                errorCount++;
+                document.getElementById('errors').textContent = errorCount;
+                logResult(`❌ Network Error in ${testName}: ${error.message}`, 'authResults');
+                
+                showErrorAnalysis({
+                    type: 'Network Error',
+                    message: error.message,
+                    suggestions: [
+                        'Check if backend server is running',
+                        'Verify backend URL is correct',
+                        'Check CORS configuration',
+                        'Verify network connectivity'
+                    ]
+                });
+            }
+        }
+
+        // Analyze 400 errors in detail
+        async function analyze400Error(responseData, payload, testName) {
+            logResult(`🔍 Analyzing 400 error for ${testName}...`, 'authResults');
+            
+            const analysis = {
+                type: '400 Bad Request',
+                testName: testName,
+                payload: payload,
+                response: responseData,
+                possibleCauses: [],
+                suggestions: []
+            };
+            
+            // Analyze missing fields
+            const requiredFields = ['email', 'password', 'name'];
+            const missingFields = requiredFields.filter(field => !payload[field]);
+            
+            if (missingFields.length > 0) {
+                analysis.possibleCauses.push(`Missing required fields: ${missingFields.join(', ')}`);
+                analysis.suggestions.push(`Add missing fields: ${missingFields.join(', ')}`);
+            }
+            
+            // Analyze email format
+            if (payload.email && !isValidEmail(payload.email)) {
+                analysis.possibleCauses.push('Invalid email format');
+                analysis.suggestions.push('Use valid email format (e.g., user@example.com)');
+            }
+            
+            // Analyze password strength
+            if (payload.password && payload.password.length < 6) {
+                analysis.possibleCauses.push('Password too short');
+                analysis.suggestions.push('Use password with at least 6 characters');
+            }
+            
+            // Check for duplicate user
+            if (responseData.message && responseData.message.includes('already exists')) {
+                analysis.possibleCauses.push('User already exists');
+                analysis.suggestions.push('Use a different email or try login instead');
+            }
+            
+            // Check for validation errors
+            if (responseData.errors || responseData.validationErrors) {
+                analysis.possibleCauses.push('Validation errors from server');
+                analysis.suggestions.push('Check server validation rules');
+            }
+            
+            showErrorAnalysis(analysis);
+        }
+
+        // Show detailed error analysis
+        function showErrorAnalysis(analysis) {
+            const container = document.getElementById('errorAnalysis');
+            container.style.display = 'block';
+            
+            container.innerHTML = `
+                <div class="error-analysis">
+                    <div class="error-title">
+                        🚨 Error Analysis: ${analysis.type}
+                    </div>
+                    
+                    ${analysis.testName ? `
+                    <div class="error-section">
+                        <h4>Test Case:</h4>
+                        <div class="error-details">${analysis.testName}</div>
+                    </div>
+                    ` : ''}
+                    
+                    ${analysis.payload ? `
+                    <div class="error-section">
+                        <h4>Payload Sent:</h4>
+                        <div class="error-details">${JSON.stringify(analysis.payload, null, 2)}</div>
+                    </div>
+                    ` : ''}
+                    
+                    ${analysis.response ? `
+                    <div class="error-section">
+                        <h4>Server Response:</h4>
+                        <div class="error-details">${JSON.stringify(analysis.response, null, 2)}</div>
+                    </div>
+                    ` : ''}
+                    
+                    ${analysis.possibleCauses && analysis.possibleCauses.length > 0 ? `
+                    <div class="error-section">
+                        <h4>Possible Causes:</h4>
+                        <ul style="margin: 0; padding-left: 20px; color: #ffa8a8;">
+                            ${analysis.possibleCauses.map(cause => `<li>${cause}</li>`).join('')}
+                        </ul>
+                    </div>
+                    ` : ''}
+                    
+                    ${analysis.suggestions && analysis.suggestions.length > 0 ? `
+                    <div class="suggestion-box">
+                        <div class="suggestion-title">
+                            💡 Suggested Fixes:
+                        </div>
+                        <ol class="fix-steps">
+                            ${analysis.suggestions.map((suggestion, index) => `
+                                <li>
+                                    <span class="step-number">${index + 1}</span>
+                                    <span>${suggestion}</span>
+                                </li>
+                            `).join('')}
+                        </ol>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Validate endpoints
+        async function validateAuthEndpoints() {
+            const baseUrl = document.getElementById('backendUrl').value;
+            logResult('✅ Validating authentication endpoints...', 'authResults');
+            
+            const endpoints = [
+                '/api/auth/register',
+                '/api/auth/login',
+                '/api/auth/me',
+                '/api/health'
+            ];
+            
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(`${baseUrl}${endpoint}`, {
+                        method: endpoint === '/api/health' ? 'GET' : 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    logResult(`${endpoint}: ${response.status} ${response.statusText}`, 'authResults');
+                } catch (error) {
+                    logResult(`${endpoint}: ❌ ${error.message}`, 'authResults');
+                }
+            }
+        }
+
+        // Custom auth test
+        async function customAuthTest() {
+            const baseUrl = document.getElementById('backendUrl').value;
+            const payload = {
+                email: document.getElementById('testEmail').value,
+                password: document.getElementById('testPassword').value,
+                name: document.getElementById('testName').value
+            };
+            
+            logResult('🎯 Running custom authentication test...', 'authResults');
+            await testRegistrationEndpoint(baseUrl, payload, 'Custom Test');
+        }
+
+        // Payload builder functions
+        function addField() {
+            const container = document.getElementById('payloadFields');
+            const newRow = document.createElement('div');
+            newRow.className = 'payload-row';
+            newRow.innerHTML = `
+                <input type="text" placeholder="Field name">
+                <input type="text" placeholder="Field value">
+                <button class="btn btn-small btn-danger" onclick="removeField(this)">×</button>
+            `;
+            container.appendChild(newRow);
+            updatePayloadPreview();
+        }
+
+        function removeField(button) {
+            button.parentElement.remove();
+            updatePayloadPreview();
+        }
+
+        function updatePayloadPreview() {
+            const rows = document.querySelectorAll('#payloadFields .payload-row');
+            const payload = {};
+            
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input');
+                const key = inputs[0].value.trim();
+                const value = inputs[1].value.trim();
+                if (key && value) {
+                    payload[key] = value;
+                }
+            });
+            
+            document.getElementById('jsonPreview').textContent = JSON.stringify(payload, null, 2);
+        }
+
+        // Add event listeners for payload builder
+        document.addEventListener('input', function(e) {
+            if (e.target.closest('#payloadFields')) {
+                updatePayloadPreview();
+            }
+        });
+
+        async function testCustomPayload() {
+            const baseUrl = document.getElementById('backendUrl').value;
+            const rows = document.querySelectorAll('#payloadFields .payload-row');
+            const payload = {};
+            
+            rows.forEach(row => {
+                const inputs = row.querySelectorAll('input');
+                const key = inputs[0].value.trim();
+                const value = inputs[1].value.trim();
+                if (key && value) {
+                    payload[key] = value;
+                }
+            });
+            
+            logResult('🔧 Testing custom payload...', 'authResults');
+            await testRegistrationEndpoint(baseUrl, payload, 'Custom Payload Test');
+        }
+
+        // Common 400 error analysis
+        async function analyzeCommon400Errors() {
+            logResult('🔍 Analyzing common 400 error patterns...', 'patternResults');
+            
+            const baseUrl = document.getElementById('backendUrl').value;
+            const commonErrorCases = [
+                { name: 'Empty Payload', payload: {} },
+                { name: 'Only Email', payload: { email: 'test@example.com' } },
+                { name: 'Invalid JSON Structure', payload: 'invalid' },
+                { name: 'Null Values', payload: { email: null, password: null, name: null } },
+                { name: 'Extra Fields', payload: { 
+                    email: 'test@example.com', 
+                    password: 'test123', 
+                    name: 'Test',
+                    extraField: 'extra',
+                    anotherExtra: 123
+                }},
+                { name: 'SQL Injection Attempt', payload: {
+                    email: "'; DROP TABLE users; --",
+                    password: 'test123',
+                    name: 'Test'
+                }}
+            ];
+            
+            for (const testCase of commonErrorCases) {
+                logResult(`→ Testing: ${testCase.name}`, 'patternResults');
+                try {
+                    const response = await fetch(`${baseUrl}/api/auth/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: typeof testCase.payload === 'string' ? testCase.payload : JSON.stringify(testCase.payload)
+                    });
+                    
+                    const responseData = await response.json().catch(() => ({}));
+                    logResult(`  Status: ${response.status}`, 'patternResults');
+                    if (response.status === 400) {
+                        logResult(`  Error: ${JSON.stringify(responseData)}`, 'patternResults');
+                    }
+                } catch (error) {
+                    logResult(`  Network Error: ${error.message}`, 'patternResults');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+        }
+
+        // Test validation errors
+        async function testValidationErrors() {
+            logResult('✅ Testing field validation...', 'patternResults');
+            
+            const validationTests = [
+                { field: 'email', values: ['', 'invalid', '@invalid.com', 'test@', 'valid@test.com'] },
+                { field: 'password', values: ['', '123', 'short', 'validpassword123'] },
+                { field: 'name', values: ['', 'a', 'Valid Name'] }
+            ];
+            
+            for (const test of validationTests) {
+                logResult(`→ Testing ${test.field} validation:`, 'patternResults');
+                for (const value of test.values) {
+                    const payload = {
+                        email: 'test@example.com',
+                        password: 'testpass123',
+                        name: 'Test User'
+                    };
+                    payload[test.field] = value;
+                    
+                    const baseUrl = document.getElementById('backendUrl').value;
+                    try {
+                        const response = await fetch(`${baseUrl}/api/auth/register`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        logResult(`  "${value}": ${response.status}`, 'patternResults');
+                    } catch (error) {
+                        logResult(`  "${value}": Network Error`, 'patternResults');
+                    }
+                }
+            }
+        }
+
+        // Test duplicate user
+        async function testDuplicateUser() {
+            logResult('👥 Testing duplicate user registration...', 'patternResults');
+            
+            const baseUrl = document.getElementById('backendUrl').value;
+            const duplicateEmail = `duplicate${Date.now()}@example.com`;
+            const payload = {
+                email: duplicateEmail,
+                password: 'testpass123',
+                name: 'Duplicate Test'
+            };
+            
+            // First registration
+            logResult('→ First registration attempt:', 'patternResults');
+            try {
+                const response1 = await fetch(`${baseUrl}/api/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                logResult(`  Status: ${response1.status}`, 'patternResults');
+                
+                // Second registration (should fail)
+                logResult('→ Duplicate registration attempt:', 'patternResults');
+                const response2 = await fetch(`${baseUrl}/api/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const responseData = await response2.json().catch(() => ({}));
+                logResult(`  Status: ${response2.status}`, 'patternResults');
+                logResult(`  Response: ${JSON.stringify(responseData)}`, 'patternResults');
+                
+            } catch (error) {
+                logResult(`  Error: ${error.message}`, 'patternResults');
+            }
+        }
+
+        // Request inspector
+        async function inspectRequest() {
+            const endpoint = document.getElementById('inspectEndpoint').value;
+            const baseUrl = document.getElementById('backendUrl').value;
+            
+            logResult('🕵️ Inspecting request details...', 'inspectorResults');
+            
+            const testPayload = {
+                email: 'inspect@example.com',
+                password: 'testpass123',
+                name: 'Inspector Test'
+            };
+            
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`${baseUrl}${endpoint}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'User-Agent': navigator.userAgent,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify(testPayload)
+                });
+                
+                const endTime = performance.now();
+                const responseText = await response.text();
+                
+                logResult('📤 Request Details:', 'inspectorResults');
+                logResult(`URL: ${baseUrl}${endpoint}`, 'inspectorResults');
+                logResult(`Method: POST`, 'inspectorResults');
+                logResult(`Headers: ${JSON.stringify({
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'User-Agent': navigator.userAgent.substring(0, 50) + '...',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }, null, 2)}`, 'inspectorResults');
+                logResult(`Body: ${JSON.stringify(testPayload, null, 2)}`, 'inspectorResults');
+                
+                logResult('📥 Response Details:', 'inspectorResults');
+                logResult(`Status: ${response.status} ${response.statusText}`, 'inspectorResults');
+                logResult(`Time: ${(endTime - startTime).toFixed(2)}ms`, 'inspectorResults');
+                logResult(`Headers: ${JSON.stringify(Object.fromEntries(response.headers), null, 2)}`, 'inspectorResults');
+                logResult(`Body: ${responseText}`, 'inspectorResults');
+                
+            } catch (error) {
+                logResult(`❌ Inspector Error: ${error.message}`, 'inspectorResults');
+            }
+        }
+
+        // Compare with working example
+        async function compareWithWorking() {
+            logResult('📊 Comparing with working example...', 'inspectorResults');
+            
+            const workingExample = {
+                url: 'https://jsonplaceholder.typicode.com/posts',
+                method: 'POST',
+                payload: { title: 'test', body: 'test', userId: 1 }
+            };
+            
+            try {
+                const response = await fetch(workingExample.url, {
+                    method: workingExample.method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(workingExample.payload)
+                });
+                
+                const data = await response.json();
+                
+                logResult('✅ Working Example (JSONPlaceholder):', 'inspectorResults');
+                logResult(`Status: ${response.status}`, 'inspectorResults');
+                logResult(`Response: ${JSON.stringify(data, null, 2)}`, 'inspectorResults');
+                logResult('💡 This confirms your network/fetch is working', 'inspectorResults');
+                
+            } catch (error) {
+                logResult(`❌ Working example failed: ${error.message}`, 'inspectorResults');
+            }
+        }
+
+        // Capture headers
+        async function captureHeaders() {
+            logResult('📋 Capturing all headers...', 'inspectorResults');
+            
+            const headers = {
+                'Browser': navigator.userAgent,
+                'Language': navigator.language,
+                'Platform': navigator.platform,
+                'Cookies Enabled': navigator.cookieEnabled,
+                'Online': navigator.onLine,
+                'Referrer': document.referrer || 'None',
+                'Current URL': window.location.href,
+                'Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
+                'Screen': `${screen.width}x${screen.height}`,
+                'Viewport': `${window.innerWidth}x${window.innerHeight}`
+            };
+            
+            logResult('🌐 Browser Environment:', 'inspectorResults');
+            Object.entries(headers).forEach(([key, value]) => {
+                logResult(`${key}: ${value}`, 'inspectorResults');
+            });
+        }
+
+        // URL navigation
+        function openUrl(path) {
+            const baseUrl = document.getElementById('frontendUrl').value;
+            window.open(`${baseUrl}${path}`, '_blank');
+        }
+
+        function openApp() {
+            const frontendUrl = document.getElementById('frontendUrl').value;
+            window.open(frontendUrl, '_blank');
+        }
+
+        // Performance monitoring
+        function startMonitoring() {
+            if (monitoringInterval) return;
+            
+            logResult('📈 Starting performance monitoring...', 'authResults');
+            startTime = Date.now();
+            
+            monitoringInterval = setInterval(() => {
+                // Update uptime or other real-time stats here
+            }, 1000);
+        }
+
+        function stopMonitoring() {
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+                logResult('⏹️ Monitoring stopped', 'authResults');
+            }
+        }
+
+        function resetStats() {
+            requestCount = 0;
+            errorCount = 0;
+            status400Count = 0;
+            document.getElementById('requests').textContent = '0';
+            document.getElementById('errors').textContent = '0';
+            document.getElementById('status400').textContent = '0';
+            document.getElementById('responseTime').textContent = '-';
+            logResult('🔄 Statistics reset', 'authResults');
+        }
+
+        // Utility functions
+        function isValidEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+
+        function logResult(message, containerId) {
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.style.display = 'block';
+                const timestamp = new Date().toLocaleTimeString();
+                container.textContent += `[${timestamp}] ${message}\n`;
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        // Modal functions
+        function showStartupGuide() {
+            document.getElementById('startupModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('startupModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('startupModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Auto-test on page load
+        setTimeout(() => {
+            if (confirm('Run automatic connection test?')) {
+                testServerConnection();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auth Debug Tool</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .card {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #333;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e7ff;
+      border-radius: 8px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+    }
+    .results {
+      background: #1e1e1e;
+      color: #f8f8f2;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+      font-family: 'Monaco', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .json-display {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 10px 0;
+      font-family: 'Monaco', 'Consolas', monospace;
+      font-size: 14px;
+      overflow-x: auto;
+    }
+    .error { color: #e74c3c; }
+    .success { color: #27ae60; }
+    .warning { color: #f39c12; }
+    .info { color: #3498db; }
+  </style>
+</head>
+<body>
+  <h1>🔐 Auth Debug Tool</h1>
+
+  <div class="card">
+    <h2>Backend Settings</h2>
+    <div class="form-group">
+      <label for="backendUrl">Backend URL:</label>
+      <input type="text" id="backendUrl" value="http://localhost:5000" placeholder="http://localhost:5000">
+    </div>
+  </div>
+
+  <!-- Registration -->
+  <div class="card">
+    <h2>📝 Test Registration</h2>
+    <div class="form-group">
+      <label for="testEmail">Email:</label>
+      <input type="email" id="testEmail" value="test@example.com">
+    </div>
+    <div class="form-group">
+      <label for="testPassword">Password:</label>
+      <input type="password" id="testPassword" value="testpassword123">
+    </div>
+    <div class="form-group">
+      <label for="testConfirmPassword">Confirm Password:</label>
+      <input type="password" id="testConfirmPassword" value="testpassword123">
+    </div>
+    <div class="form-group">
+      <label for="testName">Name:</label>
+      <input type="text" id="testName" value="Test User">
+    </div>
+    <button class="btn" onclick="testRegistration()">Test Registration</button>
+    <button class="btn" onclick="testWithDifferentData()">Try Different Email</button>
+  </div>
+
+  <!-- Login -->
+  <div class="card">
+    <h2>🔑 Test Login</h2>
+    <div class="form-group">
+      <label for="loginEmail">Email:</label>
+      <input type="email" id="loginEmail" value="test@example.com">
+    </div>
+    <div class="form-group">
+      <label for="loginPassword">Password:</label>
+      <input type="password" id="loginPassword" value="testpassword123">
+    </div>
+    <button class="btn" onclick="testLogin()">Test Login</button>
+  </div>
+
+  <!-- Custom JSON -->
+  <div class="card">
+    <h2>🛠 Manual Auth JSON Test</h2>
+    <div class="form-group">
+      <label for="customData">Custom Auth JSON:</label>
+      <textarea id="customData" rows="8"></textarea>
+    </div>
+    <button class="btn" onclick="testCustomRegistration()">Test as Registration</button>
+    <button class="btn" onclick="testCustomLogin()">Test as Login</button>
+    <button class="btn" onclick="validateJsonFormat()">Validate JSON</button>
+  </div>
+
+  <!-- Results -->
+  <div id="requestPreview" class="json-display" style="display: none;">
+    <strong>Request Data:</strong>
+    <div id="requestData"></div>
+  </div>
+
+  <div id="results" class="results" style="display: none;"></div>
+
+  <script>
+    let testCounter = 0;
+
+    function log(message, type = 'info') {
+      const results = document.getElementById('results');
+      results.style.display = 'block';
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+      results.innerHTML += `<span class="${type}">[${timestamp}] ${prefix} ${message}</span>\n`;
+      results.scrollTop = results.scrollHeight;
+    }
+
+    function showRequestPreview(data) {
+      const preview = document.getElementById('requestPreview');
+      const requestData = document.getElementById('requestData');
+      preview.style.display = 'block';
+      requestData.textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function sendPost(endpoint, data) {
+      const backendUrl = document.getElementById('backendUrl').value;
+      const url = `${backendUrl}${endpoint}`;
+      showRequestPreview(data);
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        const text = await res.text();
+        let body;
+        try {
+          body = JSON.parse(text);
+        } catch { body = text; }
+
+        log(`POST ${endpoint} ➜ ${res.status} ${res.statusText}`);
+        log(`Response: ${JSON.stringify(body, null, 2)}`);
+
+        if (res.ok) {
+          log('Success ✅', 'success');
+        } else {
+          log('Failed ❌', 'error');
+        }
+      } catch (err) {
+        log(`Network error: ${err.message}`, 'error');
+      }
+    }
+
+    function testRegistration() {
+      testCounter++;
+      const data = {
+        name: document.getElementById('testName').value,
+        email: document.getElementById('testEmail').value,
+        password: document.getElementById('testPassword').value,
+        confirmPassword: document.getElementById('testConfirmPassword').value
+      };
+      log(`Test #${testCounter} – Registration`);
+      sendPost('/api/auth/register', data);
+    }
+
+    function testLogin() {
+      testCounter++;
+      const data = {
+        email: document.getElementById('loginEmail').value,
+        password: document.getElementById('loginPassword').value
+      };
+      log(`Test #${testCounter} – Login`);
+      sendPost('/api/auth/login', data);
+    }
+
+    function testWithDifferentData() {
+      const timestamp = Date.now();
+      document.getElementById('testEmail').value = `test${timestamp}@example.com`;
+      document.getElementById('testName').value = `Test User ${timestamp}`;
+      testRegistration();
+    }
+
+    function testCustomRegistration() {
+      try {
+        const data = JSON.parse(document.getElementById('customData').value);
+        log(`Custom Test – Registration`);
+        sendPost('/api/auth/register', data);
+      } catch (err) {
+        log(`Invalid JSON: ${err.message}`, 'error');
+      }
+    }
+
+    function testCustomLogin() {
+      try {
+        const data = JSON.parse(document.getElementById('customData').value);
+        log(`Custom Test – Login`);
+        sendPost('/api/auth/login', data);
+      } catch (err) {
+        log(`Invalid JSON: ${err.message}`, 'error');
+      }
+    }
+
+    function validateJsonFormat() {
+      try {
+        const parsed = JSON.parse(document.getElementById('customData').value);
+        log('✅ Valid JSON format', 'success');
+        log(JSON.stringify(parsed, null, 2));
+      } catch (err) {
+        log(`Invalid JSON: ${err.message}`, 'error');
+      }
+    }
+
+    // Prefill default custom data
+    document.getElementById('customData').value = JSON.stringify({
+      "email": "test@example.com",
+      "password": "testpassword123"
+    }, null, 2);
+  </script>
+</body>
+</html>

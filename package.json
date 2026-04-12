@@ -1,0 +1,43 @@
+{
+  "name": "content-automation-saas",
+  "version": "1.0.0",
+  "description": "AI-powered content automation SaaS platform with WordPress integration",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build:frontend": "npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
+    "clean": "rm -rf backend/dist && rm -rf frontend/.next",
+    "install:all": "npm install && npm install --workspace=backend && npm install --workspace=frontend"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^7.6.0",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17"
+  },
+  "keywords": [
+    "content-automation",
+    "saas",
+    "ai",
+    "wordpress",
+    "content-creation",
+    "seo"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express-rate-limit": "^6.11.2",
+    "recharts": "^2.15.3"
+  }
+}
