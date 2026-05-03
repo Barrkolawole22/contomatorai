@@ -511,14 +511,18 @@ export const makeAdmin = async (req: Request, res: Response): Promise<Response> 
   }
 };
 
-// Google OAuth callback handler
-export const googleCallback = (req: Request, res: Response) => {
+export const googleCallback = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
 
     if (!user) {
       logger.error('Google callback: User object was not found on req.');
       return res.redirect(`${env.FRONTEND_URL}/login?error=google-auth-failed`);
+    }
+
+    // Google already verifies emails — mark user as verified
+    if (!user.emailVerified) {
+      await User.findByIdAndUpdate(user._id, { emailVerified: true });
     }
 
     const token = generateToken({ userId: user._id.toString() });
