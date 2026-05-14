@@ -66,7 +66,7 @@ const envSchema = z.object({
 
   // Email Configuration
   EMAIL_FROM: z.string().email('Invalid email address').optional(),
-  EMAIL_FROM_NAME: z.string().optional().default('ContentAI Pro'), // <-- ADDED THIS LINE
+  EMAIL_FROM_NAME: z.string().optional().default('ContentAI Pro'),
   EMAIL_SERVICE: z.enum(['gmail', 'outlook', 'yahoo', 'custom']).optional(),
   EMAIL_HOST: z.string().optional(),
   EMAIL_PORT: z.coerce.number().min(1).max(65535).optional(),
@@ -77,11 +77,12 @@ const envSchema = z.object({
   // === GOOGLE OAUTH ===
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALLBACK_URL: z.string().url('Invalid Google callback URL').optional(), // <-- ADDED
 
   // === TWITTER OAUTH ===
-  TWITTER_CONSUMER_KEY: z.string().optional(), // <-- ADDED THIS
-  TWITTER_CONSUMER_SECRET: z.string().optional(), // <-- ADDED THIS
-  TWITTER_CALLBACK_URL: z.string().url().optional(), // <-- ADDED THIS
+  TWITTER_CONSUMER_KEY: z.string().optional(),
+  TWITTER_CONSUMER_SECRET: z.string().optional(),
+  TWITTER_CALLBACK_URL: z.string().url().optional(),
 
   // Redis Configuration
   REDIS_URL: z.string().url('Invalid Redis URL').optional(),
