@@ -1,5 +1,6 @@
 // backend/src/models/wordPressSite.model.ts - WordPress Sites Model
 import mongoose, { Document, Schema, Model } from 'mongoose';
+import axios from 'axios';
 
 export interface IWordPressSite extends Document {
   // Basic site information
@@ -564,7 +565,6 @@ WordPressSiteSchema.pre<IWordPressSite>('save', function (next) {
 // Instance methods
 WordPressSiteSchema.methods.testConnection = async function(): Promise<boolean> {
   try {
-    const axios = require('axios');
     const auth = Buffer.from(`${this.username}:${this.applicationPassword}`).toString('base64');
     
     const startTime = Date.now();
@@ -604,7 +604,6 @@ WordPressSiteSchema.methods.testConnection = async function(): Promise<boolean> 
 
 WordPressSiteSchema.methods.syncTaxonomies = async function(): Promise<void> {
   try {
-    const axios = require('axios');
     const auth = Buffer.from(`${this.username}:${this.applicationPassword}`).toString('base64');
     
     // Sync categories
@@ -657,7 +656,6 @@ WordPressSiteSchema.methods.syncTaxonomies = async function(): Promise<void> {
 
 WordPressSiteSchema.methods.healthCheck = async function(): Promise<void> {
   try {
-    const axios = require('axios');
     const auth = Buffer.from(`${this.username}:${this.applicationPassword}`).toString('base64');
     
     // Test basic connection
@@ -725,7 +723,6 @@ WordPressSiteSchema.methods.healthCheck = async function(): Promise<void> {
 
 WordPressSiteSchema.methods.updateStats = async function(): Promise<void> {
   try {
-    const axios = require('axios');
     const auth = Buffer.from(`${this.username}:${this.applicationPassword}`).toString('base64');
     
     // Get posts statistics
@@ -783,7 +780,6 @@ WordPressSiteSchema.methods.updateStats = async function(): Promise<void> {
 
 WordPressSiteSchema.methods.publishPost = async function(postData: any): Promise<any> {
   try {
-    const axios = require('axios');
     const auth = Buffer.from(`${this.username}:${this.applicationPassword}`).toString('base64');
     
     const response = await axios.post(`${this.apiUrl}/posts`, postData, {

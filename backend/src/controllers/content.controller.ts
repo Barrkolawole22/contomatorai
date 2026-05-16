@@ -6,6 +6,7 @@ import Site from '../models/site.model';
 import User from '../models/user.model';
 import logger from '../config/logger';
 import contentService from '../services/content.service';
+import wordpressService from '../services/wordpress.service';
 
 class ContentController {
   // List all content for user
@@ -693,8 +694,6 @@ class ContentController {
         return;
       }
 
-      const wordpressService = require('../services/wordpress.service').default;
-      
       const wordpressTags = content.tags && content.tags.length > 0 
         ? content.tags.map(tag => String(tag).trim()).filter(tag => tag)
         : [];
@@ -705,7 +704,7 @@ class ContentController {
         {
           status: 'publish',
           tags: wordpressTags,
-          categories: content.categories || []
+          categories: (content.categories || []).map(String)
         }
       );
 

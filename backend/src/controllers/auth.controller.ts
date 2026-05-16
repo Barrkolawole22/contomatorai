@@ -528,7 +528,7 @@ export const googleCallback = async (req: Request, res: Response) => {
     const token = generateToken({ userId: user._id.toString() });
 
     logger.info(`Google login success, redirecting user: ${user.email}`);
-    return res.redirect(`${env.FRONTEND_URL}/oauth/callback?token=${token}`);
+    return res.redirect(`${env.FRONTEND_URL}/callback?token=${token}`);
 
   } catch (error: any) {
     logger.error('Google callback error:', error);
@@ -549,7 +549,7 @@ export const twitterCallback = (req: Request, res: Response) => {
     const token = generateToken({ userId: user._id.toString() });
 
     logger.info(`Twitter login success, redirecting user: ${user.email || user.twitterUsername}`);
-    return res.redirect(`${env.FRONTEND_URL}/oauth/callback?token=${token}`);
+    return res.redirect(`${env.FRONTEND_URL}/callback?token=${token}`);
 
   } catch (error: any) {
     logger.error('Twitter callback error:', error);

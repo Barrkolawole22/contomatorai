@@ -12,7 +12,7 @@ module.exports = {
     '!src/types/**',
     '!src/server.ts',
   ],
-  setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
   testTimeout: 10000,
   clearMocks: true,
   detectOpenHandles: true,

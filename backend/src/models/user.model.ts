@@ -1,6 +1,7 @@
 // backend/src/models/user.model.ts - FIXED VERSION
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 
 // Login history interface
 interface LoginHistoryEntry {
@@ -538,16 +539,14 @@ UserSchema.methods.comparePassword = async function (candidatePassword: string):
 // ... (Rest of the instance methods remain unchanged) ...
 
 UserSchema.methods.generatePasswordResetToken = function (): string {
-  const crypto = require('crypto');
-  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetToken = randomBytes(32).toString('hex');
   this.resetPasswordToken = resetToken;
   this.resetPasswordExpiry = new Date(Date.now() + 3600000);
   return resetToken;
 };
 
 UserSchema.methods.generateEmailVerificationToken = function (): string {
-  const crypto = require('crypto');
-  const verificationToken = crypto.randomBytes(32).toString('hex');
+  const verificationToken = randomBytes(32).toString('hex');
   this.emailVerificationToken = verificationToken;
   this.emailVerificationExpiry = new Date(Date.now() + 86400000);
   return verificationToken;
