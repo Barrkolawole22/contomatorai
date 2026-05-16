@@ -3,12 +3,10 @@ import nodemailer from 'nodemailer';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
-// 1. Create a Nodemailer Transporter
-// This is the object that can send emails
 const transporter = nodemailer.createTransport({
   host: env.EMAIL_HOST,
   port: env.EMAIL_PORT,
-  secure: env.EMAIL_SECURE, // true for port 465, false for other ports
+  secure: env.EMAIL_SECURE,
   service: env.EMAIL_SERVICE || undefined,
   auth: {
     user: env.EMAIL_USER,
@@ -16,7 +14,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// 2. Verify transporter connection on startup (optional but recommended)
 if (env.NODE_ENV !== 'test') {
   transporter.verify((error, success) => {
     if (error) {
@@ -27,35 +24,89 @@ if (env.NODE_ENV !== 'test') {
   });
 }
 
-/**
- * A generic function to send an email
- * @param to Recipient's email address
- * @param subject The subject line
- * @param html The HTML content of the email
- */
+const baseTemplate = (content: string) => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ContomatorAI</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#2563eb;padding:32px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">ContomatorAI</h1>
+              <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">AI-Powered Content Automation</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              ${content}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;padding:24px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;color:#94a3b8;font-size:12px;">
+                &copy; ${new Date().getFullYear()} ContomatorAI. All rights reserved.
+              </p>
+              <p style="margin:8px 0 0;color:#94a3b8;font-size:12px;">
+                If you did not request this email, you can safely ignore it.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+const primaryButton = (url: string, text: string) => `
+  <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
+    <tr>
+      <td style="background-color:#2563eb;border-radius:6px;">
+        <a href="${url}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:6px;">
+          ${text}
+        </a>
+      </td>
+    </tr>
+  </table>
+`;
+
+const fallbackLink = (url: string) => `
+  <p style="margin:16px 0 0;font-size:13px;color:#94a3b8;">
+    Or copy and paste this link into your browser:<br/>
+    <a href="${url}" style="color:#2563eb;word-break:break-all;">${url}</a>
+  </p>
+`;
+
 const sendEmail = async (to: string, subject: string, html: string) => {
   if (!env.EMAIL_FROM) {
     logger.error('EMAIL_FROM is not defined. Email sending skipped.');
-    // In production, you might want to throw an error
-    // For now, we'll just log and return to avoid breaking flows
     return;
   }
 
-  // ======================================================
-  // === MODIFICATION START: Use Name and Address
-  // ======================================================
   const mailOptions = {
     from: {
-      name: env.EMAIL_FROM_NAME || 'ContentAI Pro',
+      name: env.EMAIL_FROM_NAME || 'ContomatorAI',
       address: env.EMAIL_FROM,
     },
     to,
     subject,
     html,
   };
-  // ======================================================
-  // === MODIFICATION END
-  // ======================================================
 
   try {
     const info = await transporter.sendMail(mailOptions);
@@ -66,67 +117,98 @@ const sendEmail = async (to: string, subject: string, html: string) => {
   }
 };
 
-/**
- * Sends a registration verification email
- * @param to Recipient's email address
- * @param token The verification token
- */
 export const sendVerificationEmail = async (to: string, token: string) => {
-  // Use the FRONTEND_URL from your env.ts
   const verificationUrl = `${env.FRONTEND_URL}/auth/verify-email?token=${token}`;
-  
-  const subject = 'Welcome to ContentAI Pro! Please Verify Your Email';
-  const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-      <h2>Welcome to ContentAI Pro!</h2>
-      <p>Thank you for registering. Please click the link below to verify your email address:</p>
-      <p>
-        <a href="${verificationUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-          Verify Email
-        </a>
-      </p>
-      <p>If you did not create an account, please ignore this email.</p>
-      <p>Link: <a href="${verificationUrl}">${verificationUrl}</a></p>
-    </div>
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Verify your email address</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      Thanks for signing up for ContomatorAI! To get started, please verify your email address by clicking the button below.
+    </p>
+    <p style="margin:0 0 4px;color:#64748b;font-size:14px;">This link expires in <strong>24 hours</strong>.</p>
+    ${primaryButton(verificationUrl, 'Verify Email Address')}
+    ${fallbackLink(verificationUrl)}
   `;
 
-  await sendEmail(to, subject, html);
+  await sendEmail(to, 'Verify your ContomatorAI email address', baseTemplate(content));
 };
 
-/**
- * Sends a password reset email
- * @param to Recipient's email address
- * @param token The password reset token
- */
 export const sendPasswordResetEmail = async (to: string, token: string) => {
-  // Use the FRONTEND_URL from your env.ts
   const resetUrl = `${env.FRONTEND_URL}/auth/reset-password?token=${token}`;
 
-  const subject = 'ContentAI Pro - Password Reset Request';
-  const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-      <h2>Password Reset Request</h2>
-      <p>You are receiving this email because you (or someone else) requested a password reset for your account.</p>
-      <p>Please click the link below to set a new password:</p>
-      <p>
-        <a href="${resetUrl}" style="background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-          Reset Password
-        </a>
-      </p>
-      <p>This link will expire in 1 hour.</p>
-      <p>If you did not request this, please ignore this email and your password will remain unchanged.</p>
-      <p>Link: <a href="${resetUrl}">${resetUrl}</a></p>
-    </div>
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Reset your password</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      We received a request to reset the password for your ContomatorAI account. Click the button below to choose a new password.
+    </p>
+    <p style="margin:0 0 4px;color:#64748b;font-size:14px;">This link expires in <strong>1 hour</strong>.</p>
+    <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
+      <tr>
+        <td style="background-color:#dc2626;border-radius:6px;">
+          <a href="${resetUrl}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;border-radius:6px;">
+            Reset Password
+          </a>
+        </td>
+      </tr>
+    </table>
+    ${fallbackLink(resetUrl)}
+    <p style="margin:24px 0 0;padding:16px;background-color:#fef2f2;border-radius:6px;color:#991b1b;font-size:13px;">
+      If you did not request a password reset, please ignore this email. Your password will remain unchanged.
+    </p>
   `;
 
-  await sendEmail(to, subject, html);
+  await sendEmail(to, 'Reset your ContomatorAI password', baseTemplate(content));
 };
 
-// Export as a service object
+export const sendWelcomeEmail = async (to: string, name: string) => {
+  const dashboardUrl = `${env.FRONTEND_URL}/dashboard`;
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Welcome to ContomatorAI, ${name}! 🎉</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      Your email has been verified and your account is ready. You now have access to AI-powered content automation tools to supercharge your workflow.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background-color:#f8fafc;border-radius:8px;padding:20px;">
+      <tr>
+        <td>
+          <p style="margin:0 0 12px;color:#1e293b;font-size:14px;font-weight:600;">What you can do with ContomatorAI:</p>
+          <p style="margin:0 0 8px;color:#64748b;font-size:14px;">✅ &nbsp;Generate AI-powered blog posts and articles</p>
+          <p style="margin:0 0 8px;color:#64748b;font-size:14px;">✅ &nbsp;Publish directly to WordPress</p>
+          <p style="margin:0 0 8px;color:#64748b;font-size:14px;">✅ &nbsp;Schedule content in advance</p>
+          <p style="margin:0;color:#64748b;font-size:14px;">✅ &nbsp;Track usage and word credits</p>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:0 0 4px;color:#64748b;font-size:14px;">You start with <strong>1,000 free word credits</strong>. Head to your dashboard to get started.</p>
+    ${primaryButton(dashboardUrl, 'Go to Dashboard')}
+  `;
+
+  await sendEmail(to, `Welcome to ContomatorAI, ${name}!`, baseTemplate(content));
+};
+
+export const sendPasswordChangedEmail = async (to: string, name: string) => {
+  const loginUrl = `${env.FRONTEND_URL}/login`;
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Password changed successfully</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      Hi ${name}, your ContomatorAI account password was recently changed.
+    </p>
+    <p style="margin:0 0 24px;padding:16px;background-color:#fef2f2;border-radius:6px;color:#991b1b;font-size:14px;">
+      ⚠️ &nbsp;If you did not make this change, please reset your password immediately and contact support.
+    </p>
+    ${primaryButton(loginUrl, 'Go to Login')}
+  `;
+
+  await sendEmail(to, 'Your ContomatorAI password has been changed', baseTemplate(content));
+};
+
 const emailService = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendWelcomeEmail,
+  sendPasswordChangedEmail,
 };
 
 export default emailService;

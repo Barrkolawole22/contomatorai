@@ -624,23 +624,10 @@ export const register = async (req: Request, res: Response): Promise<Response> =
       logger.error('Failed to generate token or send email:', emailError);
     }
 
-    const token = jwt.sign(
-      { 
-        userId: newUser._id.toString(),
-        email: newUser.email,
-        role: newUser.role 
-      },
-      env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    const userResponse = formatUserResponse(newUser);
-
     return res.status(201).json({
       success: true,
-      message: 'User registered successfully. Please check your email to verify your account.',
-      token,
-      user: userResponse,
+      message: 'Registration successful. Please check your email to verify your account before logging in.',
+      requiresVerification: true
     });
   } catch (error) {
     console.error('Registration error:', error);
