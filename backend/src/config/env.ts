@@ -84,6 +84,9 @@ const envSchema = z.object({
   TWITTER_CONSUMER_SECRET: z.string().optional(),
   TWITTER_CALLBACK_URL: z.string().url().optional(),
 
+  // === BREVO EMAIL API ===
+  BREVO_API_KEY: z.string().optional(),
+
   // Redis Configuration
   REDIS_URL: z.string().url('Invalid Redis URL').optional(),
   REDIS_PASSWORD: z.string().optional(),

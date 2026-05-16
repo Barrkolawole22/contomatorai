@@ -1,28 +1,8 @@
 // backend/src/services/email.service.ts
-import nodemailer from 'nodemailer';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
-const transporter = nodemailer.createTransport({
-  host: env.EMAIL_HOST,
-  port: env.EMAIL_PORT,
-  secure: env.EMAIL_SECURE,
-  service: env.EMAIL_SERVICE || undefined,
-  auth: {
-    user: env.EMAIL_USER,
-    pass: env.EMAIL_PASS,
-  },
-});
-
-if (env.NODE_ENV !== 'test') {
-  transporter.verify((error, success) => {
-    if (error) {
-      logger.error('Email transporter verification failed:', error);
-    } else {
-      logger.info('Email transporter is configured and ready to send emails.');
-    }
-  });
-}
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
 const baseTemplate = (content: string) => `
 <!DOCTYPE html>
@@ -93,24 +73,45 @@ const fallbackLink = (url: string) => `
 `;
 
 const sendEmail = async (to: string, subject: string, html: string) => {
+  if (!env.BREVO_API_KEY) {
+    logger.error('BREVO_API_KEY is not defined. Email sending skipped.');
+    return;
+  }
+
   if (!env.EMAIL_FROM) {
     logger.error('EMAIL_FROM is not defined. Email sending skipped.');
     return;
   }
 
-  const mailOptions = {
-    from: {
+  const payload = {
+    sender: {
       name: env.EMAIL_FROM_NAME || 'ContomatorAI',
-      address: env.EMAIL_FROM,
+      email: env.EMAIL_FROM,
     },
-    to,
+    to: [{ email: to }],
     subject,
-    html,
+    htmlContent: html,
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    logger.info(`Email sent successfully to ${to}: ${info.messageId}`);
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': env.BREVO_API_KEY,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.json() as { message?: string };
+      logger.error(`Brevo API error for ${to}:`, error);
+      throw new Error(`Brevo API error: ${error.message || response.statusText}`);
+    }
+
+    const result = await response.json() as { messageId?: string };
+    logger.info(`Email sent successfully to ${to}: messageId ${result.messageId || 'unknown'}`);
   } catch (error) {
     logger.error(`Failed to send email to ${to}:`, error);
     throw new Error('Email sending failed');
