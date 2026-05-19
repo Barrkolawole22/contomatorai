@@ -2,11 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 import mammoth from 'mammoth';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import KnowledgeDoc, { IKnowledgeDoc } from '../models/knowledgedoc.model';
 import logger from '../config/logger';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // Projection to exclude the potentially massive chunks array from list queries
 const WITHOUT_CHUNKS = { chunks: 0 } as const;
@@ -194,9 +191,26 @@ export class KnowledgebaseService {
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
-    const model = genAI.getGenerativeModel({ model: 'embedding-001' });
-    const result = await model.embedContent(text);
-    return result.embedding.values;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
+
+    const url = `https://generativelanguage.googleapis.com/v1/models/embedding-001:embedContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: { parts: [{ text }] },
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini embedding API error (${response.status}): ${errText}`);
+    }
+
+    const data = (await response.json()) as { embedding: { values: number[] } };
+    return data.embedding.values;
   }
 
   cosineSimilarity(a: number[], b: number[]): number {
