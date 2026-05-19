@@ -1,4 +1,4 @@
-// backend/src/app.ts - FIXED with Bulk Content Routes
+// backend/src/app.ts - Updated with Knowledgebase route
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -34,6 +34,9 @@ import adminWordpressRoutes from './routes/admin-wordpress.routes';
 import adminSystemRoutes from './routes/admin-system.routes';
 import adminSettingsRoutes from './routes/admin-settings.routes';
 
+// Import knowledgebase routes
+import knowledgebaseRoutes from './routes/knowledgebase.routes';
+
 // === ADD FOR OAUTH ===
 import passport from 'passport';
 import session from 'express-session';
@@ -52,9 +55,10 @@ const ensureUploadDirs = () => {
     path.join(__dirname, '../uploads'),
     path.join(__dirname, '../uploads/avatars'),
     path.join(__dirname, '../uploads/content'),
-    path.join(__dirname, '../uploads/temp')
+    path.join(__dirname, '../uploads/temp'),
+    path.join(__dirname, '../uploads/knowledgebase'),
   ];
-  
+
   uploadDirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -85,16 +89,16 @@ app.use(cors({
     if (!origin) {
       return callback(null, true);
     }
-    
+
     const allowedOrigins = env.CORS_ORIGIN.split(',');
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    
+
     if (isDevelopment() && origin.includes('localhost')) {
       return callback(null, true);
     }
-    
+
     return callback(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
@@ -142,8 +146,8 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    return req.path === '/api/health' || 
-           req.path.startsWith('/uploads') || 
+    return req.path === '/api/health' ||
+           req.path.startsWith('/uploads') ||
            req.path === '/api/billing/webhook';
   },
 });
@@ -151,13 +155,13 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // ===== PAYSTACK WEBHOOK RAW BODY MIDDLEWARE =====
-app.use('/api/billing/webhook', express.raw({ 
+app.use('/api/billing/webhook', express.raw({
   type: 'application/json',
   limit: '1mb'
 }));
 
 // ===== BODY PARSING MIDDLEWARE =====
-app.use(express.json({ 
+app.use(express.json({
   limit: '10mb',
   verify: (req, res, buffer) => {
     (req as any).rawBody = buffer;
@@ -216,7 +220,8 @@ app.get('/api/health', (req, res) => {
       adminWordPress: true,
       adminSystem: true,
       adminSettings: true,
-      notifications: true
+      notifications: true,
+      knowledgebase: true,
     },
     uploads: {
       directory: path.join(__dirname, '../uploads'),
@@ -239,6 +244,7 @@ app.use('/api/sites', sitesRoutes);
 app.use('/api/sitemap', sitemapRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/bulk-content', bulkContentRoutes);
+app.use('/api/knowledgebase', knowledgebaseRoutes);
 
 // Notifications routes
 app.use('/api/notifications', notificationRoutes);
@@ -262,6 +268,7 @@ logger.info('  - /api/billing');
 logger.info('  - /api/sitemap');
 logger.info('  - /api/scheduler');
 logger.info('  - /api/bulk-content');
+logger.info('  - /api/knowledgebase');
 logger.info('  - /api/notifications');
 logger.info('  - /api/admin/wordpress');
 logger.info('  - /api/admin/system');
@@ -278,7 +285,7 @@ app.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       profile: '/api/profile',
-      content: '/api/content', 
+      content: '/api/content',
       sites: '/api/sites',
       wordpress: '/api/wordpress',
       keywords: '/api/keywords',
@@ -288,6 +295,7 @@ app.get('/', (req, res) => {
       sitemap: '/api/sitemap',
       scheduler: '/api/scheduler',
       bulkContent: '/api/bulk-content',
+      knowledgebase: '/api/knowledgebase',
       notifications: '/api/notifications',
       health: '/api/health',
     },
@@ -310,7 +318,16 @@ app.get('/', (req, res) => {
       generateAndSchedule: '/api/bulk-content/generate-and-schedule',
       generate: '/api/bulk-content/generate',
       estimate: '/api/bulk-content/estimate',
-      progress: '/api/bulk-content/progress/:operationId'
+      progress: '/api/bulk-content/progress/:operationId',
+      uploadCSV: '/api/bulk-content/upload-csv',
+      executeCSV: '/api/bulk-content/execute-csv',
+    },
+    knowledgebase: {
+      upload: '/api/knowledgebase/upload',
+      list: '/api/knowledgebase',
+      get: '/api/knowledgebase/:id',
+      delete: '/api/knowledgebase/:id',
+      search: '/api/knowledgebase/search',
     },
     notifications: {
       list: '/api/notifications',
@@ -364,6 +381,7 @@ app.use('*', (req, res) => {
       '/api/sitemap',
       '/api/scheduler',
       '/api/bulk-content',
+      '/api/knowledgebase',
       '/api/notifications'
     ]
   });

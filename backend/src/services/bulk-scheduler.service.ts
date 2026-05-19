@@ -6,13 +6,18 @@ import aiService, { AIModel } from './ai.service';
 import schedulerService from './scheduler.service';
 import sitemapCrawlerService from './sitemap-crawler.service';
 import promptBuilder from './prompt-builder.service';
+import knowledgebaseService from './knowledgebase.service';
 import logger from '../config/logger';
 
 interface BulkGenerationEntry {
   keyword: string;
+  topic?: string;            // Display topic; falls back to keyword if omitted
   scheduledDate?: Date;
   customPrompt?: string;
   additionalContext?: string;
+  docIds?: string[];         // Knowledgebase document IDs for RAG retrieval
+  dos?: string;              // AI must-do instructions (from CSV)
+  donts?: string;            // AI must-avoid instructions (from CSV)
 }
 
 interface BulkGenerationOptions {
@@ -66,8 +71,8 @@ export class BulkSchedulerService {
   private progressMap: Map<string, BulkProgress> = new Map();
 
   /**
-   * Generate and schedule multiple articles in one operation
-   * This is the main method you need for bulk generation + scheduling
+   * Generate and schedule multiple articles in one operation.
+   * Supports optional knowledgebase RAG via docIds and per-entry dos/donts.
    */
   async bulkGenerateAndSchedule(
     userId: string,
@@ -75,32 +80,24 @@ export class BulkSchedulerService {
     options: BulkGenerationOptions
   ): Promise<BulkGenerationResult> {
     const operationId = `bulk_${userId}_${Date.now()}`;
-    
-    // Initialize progress tracking
+
     this.progressMap.set(operationId, {
       currentIndex: 0,
       total: entries.length,
       currentKeyword: '',
       status: 'in_progress',
-      results: []
+      results: [],
     });
 
     try {
       logger.info(`🚀 Starting bulk generation for user ${userId}: ${entries.length} articles`);
 
-      // Validate user exists and has sufficient credits
       const user = await User.findById(userId);
-      if (!user) {
-        throw new Error('User not found');
-      }
+      if (!user) throw new Error('User not found');
 
-      // Validate site
       const site = await Site.findOne({ _id: options.siteId, owner: userId });
-      if (!site) {
-        throw new Error('Site not found or unauthorized');
-      }
+      if (!site) throw new Error('Site not found or unauthorized');
 
-      // Calculate total credits needed
       const selectedModel = options.model || 'groq';
       const creditsPerArticle = aiService.calculateCreditsNeeded(
         options.wordCount || 1500,
@@ -108,7 +105,6 @@ export class BulkSchedulerService {
       );
       const totalCreditsNeeded = creditsPerArticle * entries.length;
 
-      // Check if user has enough credits
       if ((user.wordCredits || 0) < totalCreditsNeeded) {
         throw new Error(
           `Insufficient credits. Need ${totalCreditsNeeded.toLocaleString()} but only have ${user.wordCredits?.toLocaleString() || 0}`
@@ -117,41 +113,39 @@ export class BulkSchedulerService {
 
       logger.info(`💳 Total credits needed: ${totalCreditsNeeded} (${creditsPerArticle} per article)`);
 
-      // Crawl sitemap once for internal links (if enabled)
+      // Crawl sitemap once if internal links are enabled
       let internalLinkSuggestions: any[] = [];
       if (options.includeInternalLinks) {
         try {
-          logger.info('📊 Crawling sitemap for internal links...');
+          logger.info('🔗 Crawling sitemap for internal links...');
           await sitemapCrawlerService.crawlSite(options.siteId);
         } catch (error: any) {
           logger.warn('Sitemap crawl failed, continuing without internal links:', error.message);
         }
       }
 
-      // Process each entry
       const results: BulkGenerationResult = {
         total: entries.length,
         successful: 0,
         failed: 0,
         results: [],
         totalCreditsUsed: 0,
-        remainingCredits: user.wordCredits || 0
+        remainingCredits: user.wordCredits || 0,
       };
 
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        
-        // Update progress
+
         const progress = this.progressMap.get(operationId);
         if (progress) {
           progress.currentIndex = i;
-          progress.currentKeyword = entry.keyword;
+          progress.currentKeyword = entry.topic || entry.keyword;
         }
 
-        logger.info(`📝 Processing ${i + 1}/${entries.length}: "${entry.keyword}"`);
+        logger.info(`📝 Processing ${i + 1}/${entries.length}: "${entry.topic || entry.keyword}"`);
 
         try {
-          // Get internal link suggestions for this keyword
+          // Internal link suggestions per entry
           if (options.includeInternalLinks) {
             try {
               const suggestions = await sitemapCrawlerService.findRelevantLinks(
@@ -166,8 +160,8 @@ export class BulkSchedulerService {
             }
           }
 
-          // Generate content
-          const generationOptions = {
+          // ── Build generation options ──────────────────────────────────────
+          const generationOptions: Record<string, any> = {
             tone: options.tone || 'professional',
             wordCount: options.wordCount || 1500,
             targetAudience: options.targetAudience || 'general audience',
@@ -185,18 +179,50 @@ export class BulkSchedulerService {
             includeComparisons: options.includeComparisons || false,
             targetKeywordDensity: options.targetKeywordDensity || 1.5,
             includeInternalLinks: options.includeInternalLinks || false,
-            internalLinkSuggestions: internalLinkSuggestions,
+            internalLinkSuggestions,
             maxInternalLinks: options.maxInternalLinks || 5,
-            internalLinkDensity: options.internalLinkDensity || 3
+            internalLinkDensity: options.internalLinkDensity || 3,
           };
 
+          // ── RAG: retrieve context from knowledgebase docs ─────────────────
+          if (entry.docIds && entry.docIds.length > 0) {
+            try {
+              logger.info(`📚 Retrieving knowledgebase context for "${entry.keyword}" from ${entry.docIds.length} doc(s)`);
+              const ragContext = await knowledgebaseService.retrieveContext(
+                userId,
+                entry.docIds,
+                entry.topic || entry.keyword
+              );
+              if (ragContext) {
+                generationOptions.additionalContext =
+                  ragContext + '\n\n' + (entry.additionalContext || '');
+              }
+            } catch (ragError: any) {
+              logger.warn(`RAG retrieval failed for "${entry.keyword}": ${ragError.message}. Continuing without knowledgebase context.`);
+            }
+          }
+
+          // ── Dos / donts from CSV ─────────────────────────────────────────
+          if (entry.dos || entry.donts) {
+            const instructionParts: string[] = [];
+            if (entry.dos) instructionParts.push(`MUST DO: ${entry.dos}`);
+            if (entry.donts) instructionParts.push(`MUST NOT: ${entry.donts}`);
+            const instructions = instructionParts.join('\n');
+            generationOptions.extraInstructions =
+              instructions + '\n\n' + (generationOptions.extraInstructions || '');
+          }
+
+          // ── Generate ─────────────────────────────────────────────────────
+          // Use topic as the display keyword if provided, fall back to keyword
+          const generationKeyword = entry.topic || entry.keyword;
+
           const generatedContent = await aiService.generateBlogPost(
-            entry.keyword,
+            generationKeyword,
             selectedModel,
             generationOptions
           );
 
-          // Create content in database
+          // ── Persist content ───────────────────────────────────────────────
           const content = new Content({
             userId,
             siteId: options.siteId,
@@ -215,12 +241,11 @@ export class BulkSchedulerService {
             timezone: options.timezone || 'UTC',
             tags: this.generateTags(entry.keyword),
             categories: [],
-            seoScore: this.calculateSEOScore(generatedContent.content, entry.keyword)
+            seoScore: this.calculateSEOScore(generatedContent.content, entry.keyword),
           });
 
           await content.save();
 
-          // Deduct credits
           const actualCreditsUsed = generatedContent.creditsUsed || creditsPerArticle;
           await user.deductWordCredits(actualCreditsUsed, content._id.toString(), 'bulk_generation');
 
@@ -231,119 +256,97 @@ export class BulkSchedulerService {
             status: 'success',
             contentId: content._id.toString(),
             scheduledDate: entry.scheduledDate,
-            creditsUsed: actualCreditsUsed
+            creditsUsed: actualCreditsUsed,
           });
 
           logger.info(`✅ Success: "${entry.keyword}" (${actualCreditsUsed} credits)`);
 
-          // Add delay to avoid rate limits (500ms between generations)
           if (i < entries.length - 1) {
             await this.delay(500);
           }
-
         } catch (error: any) {
           logger.error(`❌ Failed: "${entry.keyword}" - ${error.message}`);
-          
+
           results.failed++;
           results.results.push({
             keyword: entry.keyword,
             status: 'failed',
-            error: error.message
+            error: error.message,
           });
         }
       }
 
-      // Update final progress
       const progress = this.progressMap.get(operationId);
       if (progress) {
         progress.status = 'completed';
         progress.results = results.results;
       }
 
-      // Get updated user credits
       const updatedUser = await User.findById(userId);
       results.remainingCredits = updatedUser?.wordCredits || 0;
 
-      logger.info(`🎉 Bulk generation complete: ${results.successful}/${results.total} successful`);
+      logger.info(`🏁 Bulk generation complete: ${results.successful}/${results.total} successful`);
 
       return results;
-
     } catch (error: any) {
       logger.error('Bulk generation failed:', error);
-      
+
       const progress = this.progressMap.get(operationId);
-      if (progress) {
-        progress.status = 'failed';
-      }
+      if (progress) progress.status = 'failed';
 
       throw error;
     }
   }
 
-  /**
-   * Get progress of bulk operation
-   */
+  /** Get progress of a running bulk operation. */
   getProgress(operationId: string): BulkProgress | null {
     return this.progressMap.get(operationId) || null;
   }
 
-  /**
-   * Clear progress after completion
-   */
+  /** Clear progress record after completion. */
   clearProgress(operationId: string): void {
     this.progressMap.delete(operationId);
   }
 
-  /**
-   * Generate tags from keyword
-   */
   private generateTags(keyword: string): string[] {
     const words = keyword.split(' ').filter(word => word.length > 0);
     const baseTags = [...words.slice(0, 3)];
     baseTags.push('guide', 'tips');
-    
+
     return baseTags
       .slice(0, 5)
       .map(tag => tag.toLowerCase().trim())
       .filter((tag, index, arr) => arr.indexOf(tag) === index);
   }
 
-  /**
-   * Calculate SEO score
-   */
   private calculateSEOScore(content: string, keyword: string): number {
     if (!content || !keyword) return 0;
-    
+
     const contentLower = content.toLowerCase();
     const keywordLower = keyword.toLowerCase();
-    
+
     let score = 0;
-    
+
     if (contentLower.includes(keywordLower)) score += 25;
-    
+
     const wordCount = content.replace(/<[^>]*>/g, ' ').split(/\s+/).length;
     if (wordCount >= 300) score += 25;
-    
+
     const hasHeadings = /<h[1-6][^>]*>/i.test(content);
     if (hasHeadings) score += 25;
-    
+
     const keywordOccurrences = (contentLower.match(new RegExp(keywordLower, 'g')) || []).length;
     const keywordDensity = (keywordOccurrences / wordCount) * 100;
     if (keywordDensity >= 0.5 && keywordDensity <= 3) score += 25;
-    
+
     return Math.min(score, 100);
   }
 
-  /**
-   * Delay helper
-   */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * Simple bulk generation without scheduling (faster)
-   */
+  /** Simple bulk generation without scheduling (all drafts). */
   async bulkGenerate(
     userId: string,
     keywords: string[],
@@ -353,9 +356,7 @@ export class BulkSchedulerService {
     return this.bulkGenerateAndSchedule(userId, entries, options);
   }
 
-  /**
-   * Estimate total credits needed for bulk operation
-   */
+  /** Estimate total credits for a bulk operation. */
   estimateBulkCredits(
     entries: number,
     wordCount: number = 1500,
