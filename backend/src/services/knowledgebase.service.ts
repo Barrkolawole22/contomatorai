@@ -74,7 +74,8 @@ export class KnowledgebaseService {
 
   /**
    * RAG retrieval: embed the topic, score every chunk from the specified docs
-   * via cosine similarity, return the top-5 chunks as a formatted string.
+   * using a hybrid cosine + keyword‑overlap algorithm, then return the top‑10
+   * chunks as a formatted string.
    */
   async retrieveContext(
     userId: string,
@@ -90,24 +91,40 @@ export class KnowledgebaseService {
     if (docs.length === 0) return '';
 
     const topicEmbedding = await this.generateEmbedding(topic);
+    const topicWords = new Set(
+      topic.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    );
 
     const scored: Array<{ text: string; score: number }> = [];
 
     for (const doc of docs) {
       for (const chunk of doc.chunks) {
-        if (chunk.embedding?.length > 0) {
-          const score = this.cosineSimilarity(topicEmbedding, chunk.embedding);
-          scored.push({ text: chunk.text, score });
-        }
+        // Cosine similarity score
+        const cosineScore = chunk.embedding?.length > 0
+          ? this.cosineSimilarity(topicEmbedding, chunk.embedding)
+          : 0;
+
+        // BM25-lite: keyword overlap score
+        const chunkWords = chunk.text.toLowerCase().split(/\s+/);
+        const matchCount = chunkWords.filter(w => topicWords.has(w)).length;
+        const keywordScore = Math.min(matchCount / Math.max(topicWords.size, 1), 1);
+
+        // Hybrid: weight keyword higher for domain-specific/legal content
+        const hybridScore = 0.4 * cosineScore + 0.6 * keywordScore;
+
+        scored.push({ text: chunk.text, score: hybridScore });
       }
     }
 
     if (scored.length === 0) return '';
 
     scored.sort((a, b) => b.score - a.score);
-    const top5 = scored.slice(0, 5);
+    const topChunks = scored.slice(0, 10); // increased from 5 to 10
 
-    return top5
+    logger.info(`RAG hybrid scores: ${topChunks.map(c => c.score.toFixed(3)).join(', ')}`);
+    logger.info(`RAG context sample: ${topChunks[0]?.text?.substring(0, 200)}`);
+
+    return topChunks
       .map((c, i) => `[Source Excerpt ${i + 1}]\n${c.text}`)
       .join('\n\n---\n\n');
   }
