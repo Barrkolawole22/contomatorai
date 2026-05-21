@@ -32,17 +32,8 @@ interface PromptOptions {
   extraInstructions?: string;
 }
 
-/**
- * Improved Prompt Builder Service
- * 
- * Focus: Natural, engaging content that reads like it was written by a human expert
- * Approach: Guide rather than command, show examples, emphasize reader value
- */
 export class PromptBuilderService {
-  
-  /**
-   * Build comprehensive prompt optimized for natural, engaging content
-   */
+
   buildMasterPrompt(
     keyword: string,
     options: PromptOptions,
@@ -53,12 +44,27 @@ export class PromptBuilderService {
     const style = options.writingStyle || 'conversational';
     const targetWordCount = options.wordCount || 1500;
 
-    let prompt = `Write a comprehensive, engaging article about "${keyword}" for ${audience}.
+    let prompt = '';
 
-TARGET LENGTH: Approximately ${targetWordCount} words (aim close to target, natural ending is more important than exact count)
+    // RAG context comes FIRST — grounding before instructions
+    if (options.additionalContext) {
+      prompt += `AUTHORITATIVE SOURCE MATERIAL:
+The following is your primary knowledge source. You MUST base the article on this content. Do not fabricate statistics, cases, or facts not found here. Expand and explain what is here — do not invent new information outside of this source.
+
+---
+${options.additionalContext}
+---
+
+Now using the above as your primary source, write a comprehensive article about "${keyword}" for ${audience}.
+
+`;
+    } else {
+      prompt += `Write a comprehensive, engaging article about "${keyword}" for ${audience}.\n\n`;
+    }
+
+    prompt += `TARGET LENGTH: Approximately ${targetWordCount} words (aim close to target, natural ending is more important than exact count)
 
 ${attempt > 1 ? 'IMPORTANT: Previous attempt had issues. Focus on complete, well-developed content with proper conclusion. No placeholders or incomplete thoughts.\n\n' : ''}
-
 WRITING STYLE:
 Think like an expert writer for ${this.getStyleReference(style)}. Your goal is to inform and engage, not to sell or impress with jargon.
 
@@ -89,9 +95,6 @@ Then quickly establish:
 - What readers will gain from this article
 - Your credibility or perspective
 
-Example opening style:
-"Most content creators spend 3-4 hours writing a single blog post. Yet 90% of that content gets zero traffic in its first month. The problem isn't the writing—it's the strategy. In this guide, we'll break down the exact framework that..."
-
 3. MAIN BODY (Core content)
 Organize naturally around 4-6 major ideas, each explored in depth:
 
@@ -111,15 +114,8 @@ Organize naturally around 4-6 major ideas, each explored in depth:
   * Keep paragraphs to 3-5 sentences max
   * Use occasional one-sentence paragraphs for emphasis
 
-- Show, don't just tell
-  Good: "Instead of writing 'engage your audience,' the top-performing brands ask specific questions: 'What problem kept you up last night?' or 'When was the last time you felt truly productive?'"
-  Bad: "You should engage your audience with questions."
+- Use concrete numbers and specifics wherever available from the source material`;
 
-- Use concrete numbers and specifics
-  Good: "Companies using this approach saw email open rates jump from 18% to 34% within 60 days"
-  Bad: "This approach significantly improves open rates"`;
-
-    // Add internal linking instructions if enabled
     if (options.includeInternalLinks && options.internalLinkSuggestions && options.internalLinkSuggestions.length > 0) {
       const maxLinks = options.maxInternalLinks || 5;
       prompt += `\n\nINTERNAL LINKING (Natural Integration):
@@ -127,7 +123,7 @@ Organize naturally around 4-6 major ideas, each explored in depth:
 Include ${maxLinks} internal links throughout the article where they naturally support the content.
 
 Available links:
-${options.internalLinkSuggestions.map((link, index) => 
+${options.internalLinkSuggestions.map((link, index) =>
   `${index + 1}. "${link.title}" (${link.url})${link.description ? `\n   When to use: ${link.description}` : ''}`
 ).join('\n')}
 
@@ -141,13 +137,12 @@ Example of natural linking:
 "Before diving into advanced strategies, make sure you understand <a href="${options.internalLinkSuggestions[0]?.url}">${options.internalLinkSuggestions[0]?.title?.toLowerCase()}</a>, which forms the foundation of this approach."`;
     }
 
-    // Add optional sections based on options
     if (options.includeStatistics) {
-      prompt += '\n\n- Support claims with relevant data and statistics where applicable';
+      prompt += '\n\n- Support claims with relevant data and statistics where applicable — only use figures present in the source material';
     }
 
     if (options.includeExamples) {
-      prompt += '\n\n- Include 2-3 detailed real-world examples or case studies that illustrate key points';
+      prompt += '\n\n- Include 2-3 detailed real-world examples or case studies that illustrate key points, drawn from the source material where possible';
     }
 
     if (options.includeComparisons) {
@@ -156,7 +151,7 @@ Example of natural linking:
 
     if (options.includeFAQ) {
       prompt += `\n\n4. FREQUENTLY ASKED QUESTIONS
-Address 5-7 common questions about "${keyword}". Keep answers focused and practical—this isn't a place to be verbose. Each answer should be 2-4 sentences that directly address the question.`;
+Address 5-7 common questions about "${keyword}". Keep answers focused and practical. Each answer should be 2-4 sentences that directly address the question. Base answers on the source material provided.`;
     }
 
     prompt += `\n\n${options.includeFAQ ? '5' : '4'}. STRONG CONCLUSION (150-200 words)
@@ -165,25 +160,23 @@ Wrap up by:
 - Reinforcing the main benefit or transformation
 - ${options.callToAction ? `Include this call-to-action naturally: ${options.callToAction}` : 'Giving readers a clear next step'}
 
-Good conclusions feel like a natural endpoint, not an abrupt stop or a sales pitch.
-
 QUALITY STANDARDS:
 
 Write like a human expert having a conversation with an intelligent reader:
 - Be specific and concrete rather than vague and abstract
 - Use "you" to speak directly to readers
-- Vary your vocabulary naturally (avoid repetitive words)
+- Vary your vocabulary naturally
 - Include transitions between ideas
 - Write complete, well-developed paragraphs
 - Every sentence should add value
+- Do NOT invent statistics, studies, or facts not present in the source material
 
 Avoid these AI writing patterns:
-- Starting every paragraph with "In today's digital landscape..." or similar filler
-- Using buzzwords without explanation ("leverage," "synergy," "paradigm")
+- Starting with "In today's digital landscape..." or similar filler
+- Using buzzwords without explanation
 - Lists of obvious points without depth
-- Repetitive sentence structures
 - Generic advice without specific examples
-- Overusing the main keyword (mention it naturally, not repeatedly)
+- Fabricated data or citations
 
 SEO INTEGRATION:
 ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)}
@@ -191,53 +184,46 @@ ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)
 HTML FORMATTING:
 Use clean, semantic HTML:
 - <h1> for the main title
-- <h2> for major sections  
+- <h2> for major sections
 - <h3> for subsections within major sections
 - <p> tags for all paragraphs
 - <ul>/<ol> and <li> for lists
-- <a href="URL">text</a> for links
+- <a href="URL">text</a> for links`;
 
-Keep formatting clean and readable.`;
-
-    // Add custom instructions
     if (options.customPrompt) {
       prompt += `\n\nADDITIONAL REQUIREMENTS:\n${options.customPrompt}`;
-    }
-
-    if (options.additionalContext) {
-      prompt += `\n\nCONTEXT:\n${options.additionalContext}`;
     }
 
     if (options.extraInstructions) {
       prompt += `\n\nEXTRA GUIDELINES:\n${options.extraInstructions}`;
     }
 
-    prompt += `\n\nNow write the complete article. Focus on providing genuine value and insight—write the article you'd want to read yourself. Start with <h1> and write through to a satisfying conclusion.`;
+    prompt += `\n\nNow write the complete article. Ground every claim in the source material provided. Start with <h1> and write through to a satisfying conclusion.`;
 
     return prompt;
   }
 
-  /**
-   * Build focused system message that emphasizes natural writing
-   */
   buildSystemMessage(): string {
     return `You are an expert content writer known for creating engaging, valuable articles that read naturally.
 
 YOUR WRITING PRINCIPLES:
 
-1. CLARITY OVER CLEVERNESS
+1. GROUND EVERYTHING IN PROVIDED SOURCE MATERIAL
+When source material is provided, treat it as the authoritative reference. Do not fabricate facts, statistics, or citations not present in the source. Expand and explain what is there — do not invent beyond it.
+
+2. CLARITY OVER CLEVERNESS
 Write clearly and directly. Avoid jargon unless necessary. Explain complex topics simply without being condescending.
 
-2. SPECIFICITY OVER GENERALITY  
-Use concrete examples, specific numbers, and real scenarios. "Email open rates increased from 12% to 31%" beats "significant improvement."
+3. SPECIFICITY OVER GENERALITY
+Use concrete examples, specific numbers, and real scenarios from the source. Remove fluff and filler.
 
-3. VALUE OVER WORD COUNT
-Every paragraph should teach something new or provide actionable insight. Remove fluff and filler.
+4. VALUE OVER WORD COUNT
+Every paragraph should teach something new or provide actionable insight.
 
-4. NATURAL FLOW OVER RIGID STRUCTURE
+5. NATURAL FLOW OVER RIGID STRUCTURE
 Let ideas connect naturally. Use transitions. Vary sentence length and structure.
 
-5. READER-FOCUSED OVER KEYWORD-FOCUSED
+6. READER-FOCUSED OVER KEYWORD-FOCUSED
 Write for humans first. Include keywords naturally where they fit, not forced.
 
 FORMATTING:
@@ -246,27 +232,17 @@ FORMATTING:
 - Structure sections with <h2>, subsections with <h3>
 - Keep all formatting clean and valid
 
-WHAT MAKES YOUR WRITING STAND OUT:
-- You explain "why" not just "what"
-- You anticipate reader questions and address them
-- You write with authority but remain conversational
-- You provide actionable takeaways
-- You write complete articles with satisfying conclusions
-
 Avoid these common AI writing tells:
 - Generic openings ("In today's fast-paced world...")
+- Fabricated statistics or studies not in source material
 - Buzzword-heavy language without substance
 - Repetitive phrasing or sentence structure
-- Listing obvious points without depth
 - Keyword stuffing
 - Placeholder text or incomplete thoughts
 
-Write the article you would want to read.`;
+Write the article you would want to read, grounded in the facts provided.`;
   }
 
-  /**
-   * Build SEO guidance based on focus type
-   */
   private buildSEOGuidance(keyword: string, focus?: string, density?: number): string {
     let guidance = `Mention "${keyword}" naturally throughout the article where it fits. `;
 
@@ -291,9 +267,6 @@ Write the article you would want to read.`;
     return guidance;
   }
 
-  /**
-   * Get style reference for different writing styles
-   */
   private getStyleReference(style: string): string {
     const references = {
       conversational: 'Medium, The Atlantic, or a knowledgeable friend explaining something they care about',
@@ -306,9 +279,6 @@ Write the article you would want to read.`;
     return references[style as keyof typeof references] || references.conversational;
   }
 
-  /**
-   * Get audience description
-   */
   private getAudienceDescription(audience: string): string {
     if (audience.toLowerCase().includes('beginner')) {
       return 'Explain concepts clearly without assuming prior knowledge. Define technical terms.';
@@ -316,12 +286,9 @@ Write the article you would want to read.`;
     if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) {
       return 'Assume familiarity with basics. Focus on advanced insights and nuanced details.';
     }
-    return 'Explain key concepts but don\'t over-explain obvious points. Strike a balance.';
+    return "Explain key concepts but don't over-explain obvious points. Strike a balance.";
   }
 
-  /**
-   * Validate generated content has internal links if required
-   */
   validateInternalLinks(
     content: string,
     requiredLinks: InternalLink[]
@@ -365,9 +332,6 @@ Write the article you would want to read.`;
     };
   }
 
-  /**
-   * Extract all internal links from content
-   */
   extractInternalLinks(content: string): Array<{ url: string; anchorText: string }> {
     const linkRegex = /<a\s+href="([^"]+)">([^<]+)<\/a>/gi;
     const links: Array<{ url: string; anchorText: string }> = [];
