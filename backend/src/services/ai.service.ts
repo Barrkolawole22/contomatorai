@@ -56,6 +56,15 @@ interface GenerationOptions {
   includeExamples?: boolean;
   includeComparisons?: boolean;
   targetKeywordDensity?: number;
+  includeInternalLinks?: boolean;
+  internalLinkSuggestions?: Array<{
+  url: string;
+  title: string;
+  description?: string;
+  relevanceScore?: number;
+}>;
+  maxInternalLinks?: number;
+  internalLinkDensity?: number;
 }
 
 export class AIService {

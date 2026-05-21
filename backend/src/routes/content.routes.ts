@@ -222,6 +222,22 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
 
     console.log(`🤖 Calling AI service with model: ${selectedModel}`);
     
+    // ===== RAG: retrieve knowledgebase context if doc IDs provided =====
+    let knowledgeContext = '';
+    const docIds: string[] = options.selectedDocIds || [];
+    if (docIds.length > 0) {
+      try {
+        const knowledgebaseService = require('../services/knowledgebase.service').default;
+        logger.info(`Retrieving RAG context for "${keyword}" from ${docIds.length} doc(s)`);
+        knowledgeContext = await knowledgebaseService.retrieveContext(userId, docIds, keyword);
+        if (knowledgeContext) logger.info(`RAG context retrieved: ${knowledgeContext.length} chars`);
+      } catch (err: any) {
+        logger.warn(`RAG retrieval failed (continuing without): ${err.message}`);
+      }
+    }
+
+    const mergedContext = [knowledgeContext, options.additionalContext].filter(Boolean).join('\n\n---\n\n');
+
     const generatedContent = await aiService.generateBlogPost(
       keyword,
       selectedModel,
@@ -235,14 +251,18 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
         extraInstructions: options.extraInstructions,
         contentIntent: options.contentIntent || 'informational',
         customPrompt: options.customPrompt,
-        additionalContext: options.additionalContext,
+        additionalContext: mergedContext || undefined,
         writingStyle: options.writingStyle || 'conversational',
         seoFocus: options.seoFocus || 'balanced',
         callToAction: options.callToAction,
         includeStatistics: options.includeStatistics !== false,
         includeExamples: options.includeExamples !== false,
         includeComparisons: options.includeComparisons || false,
-        targetKeywordDensity: options.targetKeywordDensity || 1.5
+        targetKeywordDensity: options.targetKeywordDensity || 1.5,
+        includeInternalLinks: options.includeInternalLinks,
+        internalLinkSuggestions: options.internalLinkSuggestions,
+        maxInternalLinks: options.maxInternalLinks,
+        internalLinkDensity: options.internalLinkDensity,
       }
     );
 
