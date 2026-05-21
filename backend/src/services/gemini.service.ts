@@ -170,11 +170,9 @@ export class GeminiService {
 
       const actualWords = this.countWords(parsedContent.content);
       
-      if (actualWords > targetWordCount * 1.5) {
-        logger.warn(`Content ${actualWords} words (target: ${targetWordCount}). Truncating.`);
-        parsedContent.content = this.smartTruncate(parsedContent.content, targetWordCount);
-        parsedContent.wordCount = this.countWords(parsedContent.content);
-      }
+      if (actualWords > targetWordCount * 2) {
+  logger.warn(`Content ${actualWords} words (target: ${targetWordCount}). Overlength but keeping.`);
+}
       
       logger.info(`Gemini generated ${parsedContent.wordCount} words`);
       

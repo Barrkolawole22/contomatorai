@@ -1,6 +1,7 @@
 import Content from '../models/content.model';
 import User from '../models/user.model';
 import aiService, { AIModel, MODEL_CONFIG } from './ai.service';
+import knowledgebaseService from './knowledgebase.service';
 import { ContentGenerationParams, GeneratedContent, ContentData } from '../types/content.types';
 import { PaginationParams, PaginationResult } from '../types/api.types';
 import logger from '../config/logger';
@@ -8,7 +9,7 @@ import logger from '../config/logger';
 export class ContentService {
   async generateContent(userId: string, params: ContentGenerationParams): Promise<any> {
     try {
-      const p: any = params; // cast once, use everywhere
+      const p: any = params;
 
       const user = await User.findById(userId);
       if (!user) throw new Error('User not found');
@@ -37,6 +38,30 @@ export class ContentService {
         );
       }
 
+      const topic = p.keywords?.[0] || p.keyword || 'blog post';
+
+      // ── RAG: retrieve knowledgebase context if doc IDs provided ──
+      let knowledgeContext = '';
+      const docIds: string[] = p.selectedDocIds || p.docIds || [];
+      if (docIds.length > 0) {
+        try {
+          logger.info(`Retrieving RAG context for topic "${topic}" from ${docIds.length} doc(s)`);
+          knowledgeContext = await knowledgebaseService.retrieveContext(userId, docIds, topic);
+          if (knowledgeContext) {
+            logger.info(`RAG context retrieved: ${knowledgeContext.length} characters`);
+          } else {
+            logger.warn('RAG retrieval returned empty context');
+          }
+        } catch (err: any) {
+          logger.warn(`RAG retrieval failed (continuing without context): ${err.message}`);
+        }
+      }
+
+      // Merge RAG context with any additional context from frontend
+      const mergedContext = [knowledgeContext, p.additionalContext]
+        .filter(Boolean)
+        .join('\n\n---\n\n');
+
       const generationOptions = {
         tone: p.tone,
         wordCount: p.wordCount,
@@ -46,7 +71,7 @@ export class ContentService {
         includeFAQ: p.includeFAQ,
         contentIntent: p.contentIntent,
         customPrompt: p.customPrompt,
-        additionalContext: p.additionalContext,
+        additionalContext: mergedContext || undefined,
         writingStyle: p.writingStyle,
         seoFocus: p.seoFocus,
         callToAction: p.callToAction,
@@ -54,10 +79,13 @@ export class ContentService {
         includeExamples: p.includeExamples,
         includeComparisons: p.includeComparisons,
         targetKeywordDensity: p.targetKeywordDensity,
-        extraInstructions: [p.extraInstructions, p.customPrompt, p.additionalContext].filter(Boolean).join('\n\n')
+        includeInternalLinks: p.includeInternalLinks,
+        internalLinkSuggestions: p.internalLinkSuggestions,
+        maxInternalLinks: p.maxInternalLinks,
+        internalLinkDensity: p.internalLinkDensity,
+        extraInstructions: p.extraInstructions,
       };
 
-      const topic = p.keywords?.[0] || p.keyword || 'blog post';
       const generatedContent: any = await aiService.generateBlogPost(topic, selectedModel, generationOptions);
       const readingTime = Math.ceil(generatedContent.wordCount / 200);
       const metaTitle = generatedContent.title || `${topic} - Complete Guide`;
