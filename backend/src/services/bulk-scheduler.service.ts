@@ -197,6 +197,75 @@ export class BulkSchedulerService {
             generationOptions.extraInstructions = instructions + '\n\n' + (generationOptions.extraInstructions || '');
           }
 
+          // ========================================================
+          // ✅ FIX: Check if we need to schedule AI generation
+          // ========================================================
+          const now = new Date();
+          let isFutureScheduled = false;
+          let generateAt: Date | undefined = undefined;
+
+          if (entry.scheduledDate) {
+            const scheduledDate = new Date(entry.scheduledDate);
+            generateAt = new Date(scheduledDate.getTime() - 15 * 60000); // 15 mins before
+            
+            // If 15 mins before is already in the past, just generate it now
+            if (generateAt > now) {
+              isFutureScheduled = true;
+            }
+          }
+
+          if (isFutureScheduled) {
+            // Save Shell Article to DB instantly
+            const content = new Content({
+              userId,
+              siteId: options.siteId,
+              title: `[Pending AI Generation] ${entry.topic || entry.keyword}`,
+              content: '',
+              keyword: entry.keyword,
+              keywords: [entry.keyword],
+              status: 'pending_generation', // Triggers Phase 1 of cron
+              type: 'article',
+              tone: options.tone || 'professional',
+              wordCount: options.wordCount || 1500,
+              aiGenerated: true,
+              aiModel: selectedModel,
+              scheduledPublishDate: entry.scheduledDate,
+              generateAt: generateAt,
+              timezone: options.timezone || 'UTC',
+              tags: this.generateTags(entry.keyword),
+              categories: [],
+              generationOptions: {
+                tone: options.tone || 'professional',
+                wordCount: options.wordCount || 1500,
+                includeHeadings: true,
+                includeIntroduction: options.includeIntroduction !== false,
+                includeConclusion: options.includeConclusion !== false,
+                // Serialize options for the cron job to read later
+                extraInstructions: JSON.stringify({ model: selectedModel, ...generationOptions })
+              }
+            });
+
+            await content.save();
+            await user.deductWordCredits(creditsPerArticle, content._id.toString(), 'bulk_schedule_reservation');
+
+            results.successful++;
+            results.totalCreditsUsed += creditsPerArticle;
+            results.results.push({
+              keyword: entry.keyword,
+              status: 'success',
+              contentId: content._id.toString(),
+              scheduledDate: entry.scheduledDate,
+              creditsUsed: creditsPerArticle,
+            });
+
+            logger.info(`⏳ Reserved Shell: "${entry.keyword}" scheduled to generate at ${generateAt}`);
+            continue; // Skip immediate AI generation and move to next article!
+          }
+
+          // ========================================================
+          // IMMEDIATE GENERATION (If no schedule or schedule is past)
+          // ========================================================
+
           const generationKeyword = entry.topic || entry.keyword;
           const generatedContent = await aiService.generateBlogPost(generationKeyword, selectedModel, generationOptions);
 

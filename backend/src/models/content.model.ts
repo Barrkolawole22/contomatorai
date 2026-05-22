@@ -8,45 +8,37 @@ export interface IInternalLink {
 }
 
 export interface IContent extends Document {
-  // Basic content fields (your existing)
   title: string;
   content: string;
   excerpt?: string;
   slug?: string;
-  
-  // SEO fields (your existing)
   keyword: string;
   keywords?: string[];
   metaTitle?: string;
   metaDescription?: string;
   focusKeyword?: string;
-  
-  // Ownership and site association (your existing)
   userId: mongoose.Types.ObjectId;
   siteId: mongoose.Types.ObjectId;
   
-  // Content metadata (your existing - keep as is)
-  status: 'draft' | 'ready' | 'generating' | 'publishing' | 'scheduled' | 'published' | 'failed';
+  // ✅ FIXED: Added 'pending_generation'
+  status: 'draft' | 'ready' | 'pending_generation' | 'generating' | 'publishing' | 'scheduled' | 'published' | 'failed';
   type: 'post' | 'page' | 'article' | 'blog';
   tone: string;
   wordCount: number;
   readingTime?: number;
   
-  // WordPress integration - FIXED: tags should be strings for tag names, numbers for IDs
-  categories: number[]; // Keep as numbers (WordPress category IDs)
-  tags: string[]; // 🔧 CHANGED: From number[] to string[] for tag names
-  tagIds?: number[]; // 🔧 NEW: Optional field for WordPress tag IDs
+  categories: number[]; 
+  tags: string[]; 
+  tagIds?: number[]; 
   featuredImage?: string;
   publishDate?: Date;
   publishedPostId?: number;
   publishedUrl?: string;
-  publishedAt?: Date; // ✅ NEW: For frontend display
-  wordpressSite?: string; // ✅ NEW: Site name for display
+  publishedAt?: Date; 
+  wordpressSite?: string; 
   
-  // ✅ NEW: Internal Links
   internalLinks: IInternalLink[];
   
-  // AI generation metadata (your existing)
   aiGenerated: boolean;
   aiModel?: string;
   generationOptions?: {
@@ -58,12 +50,10 @@ export interface IContent extends Document {
     extraInstructions?: string;
   };
   
-  // Content quality metrics (your existing)
   seoScore?: number;
   readabilityScore?: number;
   qualityScore?: number;
   
-  // Publishing history (your existing)
   publishHistory: Array<{
     action: 'created' | 'updated' | 'published' | 'scheduled' | 'failed';
     timestamp: Date;
@@ -72,7 +62,6 @@ export interface IContent extends Document {
     error?: string;
   }>;
   
-  // Performance tracking (your existing)
   analytics?: {
     views?: number;
     clicks?: number;
@@ -80,28 +69,22 @@ export interface IContent extends Document {
     lastTracked?: Date;
   };
 
-  // 🔥 NEW: Admin-specific fields (add these for admin dashboard)
   reviewStatus?: 'pending' | 'approved' | 'rejected' | 'needs_revision';
   reviewNotes?: string;
   reviewedAt?: Date;
   reviewerId?: mongoose.Types.ObjectId;
-  
-  // 🔥 NEW: Content format (for admin filtering)
   contentFormat?: 'html' | 'markdown' | 'plaintext';
-  
-  // 🔥 NEW: Generation source (for admin analytics)
   generatedBy?: 'openai' | 'gemini' | 'groq' | 'claude' | 'manual' | 'template';
   
   // ✅ NEW: Post Scheduling fields
   scheduledPublishDate?: Date;
+  generateAt?: Date; // ✅ NEW field for 15-minute offset
   timezone?: string;
   publishError?: string;
   
-  // Timestamps (your existing)
   createdAt: Date;
   updatedAt: Date;
   
-  // Instance methods (your existing + new)
   updateWordCount(): void;
   calculateReadingTime(): number;
   calculateSEOScore(): number;
@@ -109,12 +92,11 @@ export interface IContent extends Document {
   isPublished(): boolean;
   canEdit(): boolean;
   generateSlug(): string;
-  updateQualityScore(): Promise<void>; // NEW: For admin quality analysis
+  updateQualityScore(): Promise<void>; 
 }
 
 const ContentSchema: Schema<IContent> = new Schema<IContent>(
   {
-    // Basic content information (your existing)
     title: {
       type: String,
       required: [true, 'Title is required'],
@@ -124,7 +106,8 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
     },
     content: {
       type: String,
-      required: [true, 'Content is required'],
+      // Required is removed temporarily since shell articles start empty
+      default: '', 
     },
     excerpt: {
       type: String,
@@ -137,8 +120,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       lowercase: true,
       index: true,
     },
-    
-    // SEO and keyword fields (your existing)
     keyword: {
       type: String,
       required: [true, 'Primary keyword is required'],
@@ -170,8 +151,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       trim: true,
       default: undefined,
     },
-    
-    // Ownership and associations (your existing)
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -184,13 +163,12 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       required: [false, 'Site ID is not required'],
       index: true,
     },
-    
-    // Content status and type (your existing - perfect!)
     status: {
       type: String,
       enum: {
-        values: ['draft', 'ready', 'generating', 'publishing', 'scheduled', 'published', 'failed'],
-        message: 'Status must be one of: draft, ready, generating, publishing, scheduled, published, failed'
+        // ✅ FIXED: Added 'pending_generation'
+        values: ['draft', 'ready', 'pending_generation', 'generating', 'publishing', 'scheduled', 'published', 'failed'],
+        message: 'Status must be one of: draft, ready, pending_generation, generating, publishing, scheduled, published, failed'
       },
       default: 'draft',
       index: true,
@@ -208,8 +186,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       enum: ['informative', 'conversational', 'professional', 'friendly', 'authoritative', 'casual'],
       default: 'informative',
     },
-    
-    // Content metrics (your existing)
     wordCount: {
       type: Number,
       default: 0,
@@ -220,8 +196,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       default: 0,
       min: [0, 'Reading time cannot be negative'],
     },
-    
-    // WordPress fields - FIXED TAGS SCHEMA
     categories: {
       type: [Number],
       default: [],
@@ -232,9 +206,8 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
         message: 'Cannot assign more than 5 categories'
       }
     },
-    // 🔧 MAIN FIX: Changed tags from [Number] to [String]
     tags: {
-      type: [String], // ✅ FIXED: Now accepts string array
+      type: [String], 
       default: [],
       validate: {
         validator: function(tags: string[]) {
@@ -243,7 +216,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
         message: 'Cannot assign more than 10 tags'
       }
     },
-    // 🔧 NEW: Optional field for WordPress tag IDs (when publishing)
     tagIds: {
       type: [Number],
       default: [],
@@ -258,8 +230,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       type: String,
       default: undefined,
     },
-    
-    // Publishing information (your existing)
     publishDate: {
       type: Date,
       default: undefined,
@@ -283,8 +253,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       type: String,
       default: null,
     },
-    
-    // ✅ NEW: Internal Links field
     internalLinks: {
       type: [{
         url: {
@@ -310,8 +278,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
         message: 'Cannot have more than 20 internal links'
       }
     },
-    
-    // AI generation metadata (your existing)
     aiGenerated: {
       type: Boolean,
       default: false,
@@ -332,8 +298,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       },
       default: undefined,
     },
-    
-    // Quality scores (your existing)
     seoScore: {
       type: Number,
       default: 0,
@@ -353,8 +317,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       max: [100, 'Quality score cannot exceed 100'],
       index: true,
     },
-    
-    // Publishing history (your existing)
     publishHistory: {
       type: [{
         action: {
@@ -373,8 +335,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       }],
       default: [],
     },
-    
-    // Performance analytics (your existing)
     analytics: {
       type: {
         views: { type: Number, default: 0 },
@@ -384,8 +344,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       },
       default: undefined,
     },
-
-    // Admin-specific fields
     reviewStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected', 'needs_revision'],
@@ -405,24 +363,24 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
       ref: 'User',
       default: undefined,
     },
-    
-    // Content format
     contentFormat: {
       type: String,
       enum: ['html', 'markdown', 'plaintext'],
       default: 'html',
     },
-    
-    // Generation source for admin analytics
     generatedBy: {
       type: String,
-      enum: ['openai', 'gemini', 'gemini-pro', 'gpt4o', 'claude', 'manual', 'template'],
+      enum: ['openai', 'gemini', 'groq', 'claude', 'manual', 'template'],
       default: 'manual',
       index: true,
     },
-
-    // ✅ NEW: Post Scheduling fields
     scheduledPublishDate: {
+      type: Date,
+      index: true,
+      default: undefined,
+    },
+    // ✅ NEW: 15-minute generation offset tracker
+    generateAt: {
       type: Date,
       index: true,
       default: undefined,
@@ -441,7 +399,6 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
     toJSON: {
       virtuals: true,
       transform: function(doc, ret) {
-        // Clean up the returned object
         delete ret.__v;
         return ret;
       }
@@ -449,48 +406,38 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
   }
 );
 
-// Compound indexes for better query performance (your existing + new)
 ContentSchema.index({ userId: 1, status: 1 });
 ContentSchema.index({ userId: 1, siteId: 1 });
 ContentSchema.index({ userId: 1, createdAt: -1 });
 ContentSchema.index({ siteId: 1, status: 1, publishDate: 1 });
-ContentSchema.index({ keyword: 'text', title: 'text' }); // Text search
-
-// 🔥 NEW: Admin-specific indexes
+ContentSchema.index({ keyword: 'text', title: 'text' }); 
 ContentSchema.index({ reviewStatus: 1, createdAt: -1 });
 ContentSchema.index({ qualityScore: -1 });
 ContentSchema.index({ generatedBy: 1, createdAt: -1 });
-
-// ✅ NEW: Scheduler-specific indexes
 ContentSchema.index({ status: 1, scheduledPublishDate: 1 });
 ContentSchema.index({ scheduledPublishDate: 1 });
+ContentSchema.index({ generateAt: 1, status: 1 }); // ✅ NEW index for the cron job
 
-// Middleware to update word count and reading time before saving (your existing)
 ContentSchema.pre<IContent>('save', function (next) {
-  if (this.isModified('content')) {
+  if (this.isModified('content') && this.content) {
     this.updateWordCount();
     this.readingTime = this.calculateReadingTime();
     
-    // Generate slug from title if not provided
     if (!this.slug && this.title) {
       this.slug = this.generateSlug();
     }
     
-    // Set focus keyword to primary keyword if not set
     if (!this.focusKeyword && this.keyword) {
       this.focusKeyword = this.keyword;
     }
     
-    // Add keywords array if not set
     if (!this.keywords || this.keywords.length === 0) {
       this.keywords = [this.keyword];
     }
   }
-  
   next();
 });
 
-// All your existing instance methods (keep exactly as they are)
 ContentSchema.methods.updateWordCount = function (): void {
   if (this.content) {
     const plainText = this.content.replace(/<[^>]*>/g, ' ');
@@ -507,12 +454,8 @@ ContentSchema.methods.calculateReadingTime = function (): number {
 
 ContentSchema.methods.calculateSEOScore = function (): number {
   let score = 0;
-  
-  // Title checks (30 points)
   if (this.title && this.title.length >= 30 && this.title.length <= 60) score += 15;
   if (this.title && this.keyword && this.title.toLowerCase().includes(this.keyword.toLowerCase())) score += 15;
-  
-  // Content checks (40 points)
   if (this.wordCount >= 300) score += 10;
   if (this.wordCount >= 1000) score += 10;
   if (this.content && this.keyword) {
@@ -520,14 +463,9 @@ ContentSchema.methods.calculateSEOScore = function (): number {
     const keywordDensity = (keywordCount / this.wordCount) * 100;
     if (keywordDensity >= 0.5 && keywordDensity <= 2.5) score += 20;
   }
-  
-  // Meta description (15 points)
   if (this.metaDescription && this.metaDescription.length >= 120 && this.metaDescription.length <= 160) score += 15;
-  
-  // Structure checks (15 points)
   if (this.content && this.content.includes('<h2>')) score += 10;
   if (this.excerpt && this.excerpt.length > 0) score += 5;
-  
   return Math.min(score, 100);
 };
 
@@ -557,11 +495,8 @@ ContentSchema.methods.generateSlug = function (): string {
     .replace(/^-+|-+$/g, '');
 };
 
-// 🔥 NEW: Quality score calculation for admin analytics - UPDATED for string tags
 ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
   let score = 0;
-  
-  // Title quality (0-20 points)
   if (this.title && this.title.length >= 30 && this.title.length <= 60) {
     score += 20;
   } else if (this.title && this.title.length >= 20) {
@@ -570,7 +505,6 @@ ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
     score += 10;
   }
   
-  // Content length (0-20 points)
   if (this.wordCount >= 1500) {
     score += 20;
   } else if (this.wordCount >= 1000) {
@@ -581,7 +515,6 @@ ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
     score += 5;
   }
   
-  // Meta description (0-15 points)
   if (this.metaDescription && this.metaDescription.length >= 120 && this.metaDescription.length <= 160) {
     score += 15;
   } else if (this.metaDescription && this.metaDescription.length >= 100) {
@@ -590,7 +523,6 @@ ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
     score += 5;
   }
   
-  // Keywords (0-15 points)
   if (this.keywords && this.keywords.length >= 5) {
     score += 15;
   } else if (this.keywords && this.keywords.length >= 3) {
@@ -599,19 +531,16 @@ ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
     score += 5;
   }
   
-  // Featured image (0-10 points)
   if (this.featuredImage) {
     score += 10;
   }
   
-  // Categories and tags (0-10 points) - UPDATED for string tags
   if (this.categories.length > 0 && this.tags.length > 0) {
     score += 10;
   } else if (this.categories.length > 0 || this.tags.length > 0) {
     score += 5;
   }
   
-  // Excerpt (0-10 points)
   if (this.excerpt && this.excerpt.length >= 100) {
     score += 10;
   } else if (this.excerpt) {
@@ -622,7 +551,6 @@ ContentSchema.methods.updateQualityScore = async function(): Promise<void> {
   await this.save();
 };
 
-// Static methods (your existing + new)
 ContentSchema.statics.findByUser = function (userId: string) {
   return this.find({ userId }).populate('siteId', 'name url');
 };
@@ -651,11 +579,10 @@ ContentSchema.statics.findByKeyword = function (keyword: string) {
   });
 };
 
-// 🔥 NEW: Admin-specific static methods
 ContentSchema.statics.findForReview = function () {
   return this.find({ reviewStatus: 'pending' })
     .populate('userId', 'name email')
-    .sort({ createdAt: 1 }); // Oldest first
+    .sort({ createdAt: 1 }); 
 };
 
 ContentSchema.statics.findByQualityScore = function (minScore = 0, maxScore = 100) {
@@ -669,18 +596,15 @@ ContentSchema.statics.findByGeneratedBy = function (source: string) {
     .sort({ createdAt: -1 });
 };
 
-// Virtual for formatted publish date (your existing)
 ContentSchema.virtual('formattedPublishDate').get(function () {
   return this.publishDate ? this.publishDate.toISOString().split('T')[0] : null;
 });
 
-// Virtual for content preview (your existing)
 ContentSchema.virtual('preview').get(function () {
   if (!this.content) return '';
   const plainText = this.content.replace(/<[^>]*>/g, ' ');
   return plainText.substring(0, 200) + (plainText.length > 200 ? '...' : '');
 });
 
-// Prevent model overwrite error (your existing)
 const Content = mongoose.model<IContent>('Content', ContentSchema);
 export default Content;

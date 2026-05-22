@@ -18,7 +18,6 @@ const baseTemplate = (content: string) => `
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
           
-          <!-- Header -->
           <tr>
             <td style="background-color:#2563eb;padding:32px 40px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:-0.5px;">ContomatorAI</h1>
@@ -26,14 +25,12 @@ const baseTemplate = (content: string) => `
             </td>
           </tr>
 
-          <!-- Body -->
           <tr>
             <td style="padding:40px;">
               ${content}
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
             <td style="background-color:#f8fafc;padding:24px 40px;border-top:1px solid #e2e8f0;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;">
@@ -204,12 +201,27 @@ export const sendPasswordChangedEmail = async (to: string, name: string) => {
   await sendEmail(to, 'Your ContomatorAI password has been changed', baseTemplate(content));
 };
 
+// ✅ NEW: Notify user when an article is published
+export const sendPostPublishedEmail = async (to: string, name: string, postTitle: string, postUrl: string, siteName: string) => {
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Your Article is Live! 🚀</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      Hi ${name}, great news! Your scheduled article <strong>"${postTitle}"</strong> has just been successfully published to <strong>${siteName}</strong>.
+    </p>
+    ${primaryButton(postUrl, 'View Live Article')}
+    ${fallbackLink(postUrl)}
+  `;
+
+  await sendEmail(to, `Success: Your article is live on ${siteName}!`, baseTemplate(content));
+};
+
 const emailService = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendPasswordChangedEmail,
+  sendPostPublishedEmail, // ✅ Exported here
 };
 
 export default emailService;

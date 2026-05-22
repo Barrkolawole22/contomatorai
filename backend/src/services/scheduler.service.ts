@@ -4,12 +4,13 @@ import Site from '../models/site.model';
 import User from '../models/user.model';
 import logger from '../config/logger';
 import wordpressService from './wordpress.service';
+import aiService from './ai.service'; // ✅ Added import
+import emailService from './email.service'; // ✅ Added import
 
-// ✅ FIXED: Updated interface to match frontend
 interface SchedulePostParams {
   contentId: string;
-  siteId: string;  // ✅ ADDED
-  scheduledFor: Date;  // ✅ RENAMED from scheduledDate
+  siteId: string; 
+  scheduledFor: Date;  
   timezone?: string;
 }
 
@@ -44,37 +45,29 @@ interface ScheduledPost {
 
 export class SchedulerService {
   
-  /**
-   * ✅ FIXED: Schedule a post for future publishing
-   */
   async schedulePost(userId: string, params: SchedulePostParams): Promise<any> {
     try {
       const { contentId, siteId, scheduledFor, timezone = 'UTC' } = params;
 
-      // Validate content exists and belongs to user
       const content = await Content.findOne({ _id: contentId, userId });
       if (!content) {
         throw new Error('Content not found or unauthorized');
       }
 
-      // ✅ NEW: Validate site exists and belongs to user
       const site = await Site.findOne({ _id: siteId, owner: userId });
       if (!site) {
         throw new Error('WordPress site not found or unauthorized');
       }
 
-      // Associate content with site if not already
       if (!content.siteId || content.siteId.toString() !== siteId) {
         content.siteId = site._id as any;
       }
 
-      // Validate scheduled date is in the future
       const scheduledDate = new Date(scheduledFor);
       if (scheduledDate <= new Date()) {
         throw new Error('Scheduled date must be in the future');
       }
 
-      // Update content with schedule info
       content.status = 'scheduled';
       content.scheduledPublishDate = scheduledDate;
       content.timezone = timezone;
@@ -105,9 +98,6 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ NEW: Get all scheduled posts with filters
-   */
   async getScheduledPosts(
     userId: string,
     filters?: {
@@ -121,19 +111,16 @@ export class SchedulerService {
     try {
       const query: any = { userId };
 
-      // Add status filter (default to scheduled only)
       if (filters?.status && filters.status !== 'all') {
         query.status = filters.status;
       } else {
-        query.status = 'scheduled';
+        query.status = { $in: ['scheduled', 'pending_generation'] }; // Support both
       }
 
-      // Add site filter
       if (filters?.siteId) {
         query.siteId = filters.siteId;
       }
 
-      // Add date range filter
       if (filters?.startDate || filters?.endDate) {
         query.scheduledPublishDate = {};
         if (filters.startDate) {
@@ -184,15 +171,12 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ NEW: Get single scheduled post by ID
-   */
   async getScheduledPostById(userId: string, scheduleId: string): Promise<any> {
     try {
       const content = await Content.findOne({
         _id: scheduleId,
         userId,
-        status: { $in: ['scheduled', 'published', 'failed'] }
+        status: { $in: ['scheduled', 'published', 'failed', 'pending_generation'] }
       }).populate('siteId', 'name url');
 
       if (!content) {
@@ -229,31 +213,31 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ ENHANCED: Update schedule with optional site change
-   */
   async updateSchedule(userId: string, scheduleId: string, params: UpdateScheduleParams): Promise<any> {
     try {
       const content = await Content.findOne({ 
         _id: scheduleId, 
         userId, 
-        status: 'scheduled' 
+        status: { $in: ['scheduled', 'pending_generation'] }
       });
 
       if (!content) {
         throw new Error('Scheduled post not found');
       }
 
-      // Update scheduled date if provided
       if (params.scheduledFor) {
         const newDate = new Date(params.scheduledFor);
         if (newDate <= new Date()) {
           throw new Error('New scheduled date must be in the future');
         }
         content.scheduledPublishDate = newDate;
+        
+        // Also adjust the generateAt offset if it's pending generation
+        if (content.status === 'pending_generation') {
+          content.generateAt = new Date(newDate.getTime() - 15 * 60000);
+        }
       }
 
-      // Update site if provided
       if (params.siteId) {
         const site = await Site.findOne({ _id: params.siteId, owner: userId });
         if (!site) {
@@ -262,7 +246,6 @@ export class SchedulerService {
         content.siteId = site._id as any;
       }
 
-      // Update timezone if provided
       if (params.timezone) {
         content.timezone = params.timezone;
       }
@@ -287,15 +270,12 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ FIXED: Cancel scheduled post (revert to draft)
-   */
   async cancelSchedule(userId: string, scheduleId: string): Promise<any> {
     try {
       const content = await Content.findOne({ 
         _id: scheduleId, 
         userId, 
-        status: 'scheduled' 
+        status: { $in: ['scheduled', 'pending_generation'] } 
       });
 
       if (!content) {
@@ -304,6 +284,7 @@ export class SchedulerService {
 
       content.status = 'draft';
       content.scheduledPublishDate = undefined;
+      content.generateAt = undefined;
       await content.save();
 
       logger.info(`✅ Cancelled schedule for post ${scheduleId}`);
@@ -318,15 +299,12 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ NEW: Publish scheduled post immediately
-   */
   async publishNow(userId: string, scheduleId: string): Promise<any> {
     try {
       const content = await Content.findOne({
         _id: scheduleId,
         userId,
-        status: 'scheduled'
+        status: { $in: ['scheduled', 'pending_generation'] }
       }).populate('siteId');
 
       if (!content) {
@@ -335,6 +313,23 @@ export class SchedulerService {
 
       if (!content.siteId) {
         throw new Error('Content has no associated WordPress site');
+      }
+      
+      // If the user hits Publish Now while it's pending generation, generate it immediately first
+      if (content.status === 'pending_generation') {
+         let genOptions: any = {};
+         if (content.generationOptions?.extraInstructions) {
+            try { genOptions = JSON.parse(content.generationOptions.extraInstructions); } catch(e) {}
+         }
+         const generatedContent = await aiService.generateBlogPost(
+           content.keyword,
+           (genOptions.model || content.aiModel || 'gemini') as any,
+           genOptions
+         );
+         content.title = generatedContent.title;
+         content.content = generatedContent.content;
+         content.status = 'scheduled'; 
+         await content.save();
       }
 
       // Publish immediately
@@ -357,18 +352,70 @@ export class SchedulerService {
   }
 
   /**
-   * ✅ EXISTING: Check and publish posts that are ready (run via cron)
+   * ✅ FIXED: Handles 15-min generation offset AND publishing
    */
   async processScheduledPosts(): Promise<void> {
     try {
       const now = new Date();
       
+      // ==========================================
+      // PHASE 1: Generate Content (15 mins prior)
+      // ==========================================
+      const postsToGenerate = await Content.find({
+        status: 'pending_generation',
+        generateAt: { $lte: now }
+      });
+
+      if (postsToGenerate.length > 0) {
+        logger.info(`🔍 Found ${postsToGenerate.length} posts ready for AI generation`);
+      }
+
+      for (const content of postsToGenerate) {
+        try {
+          logger.info(`🤖 Auto-generating scheduled content for: ${content.keyword}`);
+          
+          let genOptions: any = {};
+          if (content.generationOptions?.extraInstructions) {
+            try {
+               genOptions = JSON.parse(content.generationOptions.extraInstructions);
+            } catch(e) {}
+          }
+
+          const selectedModel = genOptions.model || content.aiModel || 'gemini';
+
+          const generatedContent = await aiService.generateBlogPost(
+            content.keyword,
+            selectedModel as any,
+            genOptions
+          );
+
+          content.title = generatedContent.title;
+          content.content = generatedContent.content;
+          content.wordCount = generatedContent.wordCount;
+          content.readingTime = Math.ceil(generatedContent.wordCount / 200);
+          content.status = 'scheduled'; // Ready for Phase 2
+
+          await content.save();
+          logger.info(`✅ Successfully generated and prepared scheduled post: ${content._id}`);
+        } catch (error: any) {
+          logger.error(`❌ Failed to auto-generate content for ${content._id}:`, error.message);
+          content.status = 'failed';
+          content.publishError = 'Generation failed: ' + error.message;
+          await content.save();
+        }
+      }
+
+      // ==========================================
+      // PHASE 2: Publish to WordPress
+      // ==========================================
       const postsToPublish = await Content.find({
         status: 'scheduled',
         scheduledPublishDate: { $lte: now }
       }).populate('siteId');
 
-      logger.info(`🔍 Found ${postsToPublish.length} posts ready to publish`);
+      if (postsToPublish.length > 0) {
+        logger.info(`🔍 Found ${postsToPublish.length} posts ready to publish`);
+      }
 
       for (const content of postsToPublish) {
         try {
@@ -386,9 +433,6 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ EXISTING: Publish a single scheduled post
-   */
   private async publishScheduledPost(content: any): Promise<void> {
     try {
       if (!content.siteId) {
@@ -436,27 +480,27 @@ export class SchedulerService {
   }
 
   /**
-   * ✅ EXISTING: Notify user when post is published
+   * ✅ FIXED: Connected directly to Brevo Email API
    */
   private async notifyUserOfPublish(userId: string, content: any, site: any): Promise<void> {
     try {
       const user = await User.findById(userId);
-      if (!user) return;
+      if (!user || !user.email) return;
 
       logger.info(`📧 Notification: Post "${content.title}" published to ${site.name} for user ${user.email}`);
       
-      // TODO: Implement email notification
-      // - SendGrid/Mailgun integration
-      // - Push notifications
-      // - In-app notifications
+      await emailService.sendPostPublishedEmail(
+        user.email,
+        user.name || 'User',
+        content.title,
+        content.publishedUrl || site.url,
+        site.name
+      );
     } catch (error: any) {
       logger.error('Error sending notification:', error);
     }
   }
 
-  /**
-   * ✅ ENHANCED: Get scheduled posts calendar with better formatting
-   */
   async getScheduledPostsCalendar(
     userId: string, 
     startDate: Date, 
@@ -465,7 +509,7 @@ export class SchedulerService {
     try {
       const posts = await Content.find({
         userId,
-        status: { $in: ['scheduled', 'published'] },
+        status: { $in: ['scheduled', 'published', 'pending_generation'] },
         scheduledPublishDate: {
           $gte: startDate,
           $lte: endDate
@@ -474,7 +518,6 @@ export class SchedulerService {
       .populate('siteId', 'name url')
       .sort({ scheduledPublishDate: 1 });
 
-      // Group by date
       const grouped: Record<string, any[]> = {};
       
       posts.forEach(post => {
@@ -508,9 +551,6 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ ENHANCED: Get scheduling statistics
-   */
   async getSchedulingStats(userId: string, siteId?: string): Promise<any> {
     try {
       const baseQuery: any = { userId };
@@ -525,10 +565,10 @@ export class SchedulerService {
         upcomingThisWeek,
         failedPosts
       ] = await Promise.all([
-        Content.countDocuments({ ...baseQuery, status: 'scheduled' }),
+        Content.countDocuments({ ...baseQuery, status: { $in: ['scheduled', 'pending_generation'] } }),
         Content.countDocuments({ 
           ...baseQuery, 
-          status: 'scheduled',
+          status: { $in: ['scheduled', 'pending_generation'] },
           scheduledPublishDate: { $gte: new Date() }
         }),
         Content.countDocuments({
@@ -541,7 +581,7 @@ export class SchedulerService {
         }),
         Content.countDocuments({
           ...baseQuery,
-          status: 'scheduled',
+          status: { $in: ['scheduled', 'pending_generation'] },
           scheduledPublishDate: {
             $gte: new Date(),
             $lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
@@ -566,9 +606,6 @@ export class SchedulerService {
     }
   }
 
-  /**
-   * ✅ ENHANCED: Bulk schedule multiple posts
-   */
   async bulkSchedule(
     userId: string, 
     schedules: { contentId: string; siteId: string; scheduledFor: Date; timezone?: string }[]
@@ -602,10 +639,11 @@ export class SchedulerService {
   }
 
   /**
-   * ✅ Helper: Map content status to scheduler status
+   * ✅ FIXED: Mapped pending_generation to "pending" for the frontend UI to understand
    */
   private mapStatus(contentStatus: string): 'pending' | 'published' | 'failed' | 'cancelled' {
     switch (contentStatus) {
+      case 'pending_generation':
       case 'scheduled':
         return 'pending';
       case 'published':
