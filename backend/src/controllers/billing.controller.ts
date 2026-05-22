@@ -284,7 +284,7 @@ class BillingController {
             { display_name: 'Type', variable_name: 'purchase_type', value: type },
           ],
         },
-        callback_url: `${process.env.FRONTEND_URL}/billing/verify-payment`,
+        callback_url: `${process.env.FRONTEND_URL}/dashboard/billing?verify=1`,
         channels: ['card', 'bank', 'ussd', 'mobile_money'],
       });
 
