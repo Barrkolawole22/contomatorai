@@ -6,7 +6,6 @@ import claudeService from './claude.service';
 
 export type AIModel = 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
 
-// Model configuration with credit multipliers
 export const MODEL_CONFIG = {
   gemini: {
     label: 'Fast',
@@ -27,7 +26,8 @@ export const MODEL_CONFIG = {
     enableGrounding: true,
     icon: '🌟',
     speed: 'fast',
-    quality: 'better'
+    quality: 'better',
+    fallback: 'gemini' as AIModel  // fallback when quota exceeded
   },
   gpt4o: {
     label: 'Premium',
@@ -40,7 +40,7 @@ export const MODEL_CONFIG = {
   },
   claude: {
     label: 'Elite',
-    description: 'Claude 3.5 Sonnet – deepest analysis and longest form',
+    description: 'Claude – deepest analysis and longest form',
     creditMultiplier: 5,
     service: claudeService,
     icon: '💎',
@@ -80,6 +80,11 @@ interface GenerationOptions {
   internalLinkDensity?: number;
 }
 
+function isQuotaError(error: any): boolean {
+  const msg = error?.message || '';
+  return msg.includes('429') || msg.includes('quota') || msg.includes('rate limit') || msg.includes('RESOURCE_EXHAUSTED');
+}
+
 export class AIService {
   constructor() {
     logger.info('AI Service initialized with multi-model support: Gemini, GPT-4o, Claude');
@@ -104,38 +109,61 @@ export class AIService {
     );
 
     try {
-      const startTime = Date.now();
-
-      // Pass model-specific options
-      const serviceOptions = { ...options };
-     if (model === 'gemini' || model === 'gemini-pro') {
-        (serviceOptions as any).modelVariant = (config as any).modelVariant;
-        if (model === 'gemini-pro') {
-          (serviceOptions as any).enableGrounding = true;
+      return await this._runGeneration(keyword, model, options, targetWordCount);
+    } catch (error: any) {
+      // Fallback logic: if quota error and a fallback model is defined, retry with fallback
+      const fallbackModel = (config as any).fallback as AIModel | undefined;
+      if (isQuotaError(error) && fallbackModel) {
+        logger.warn(`⚠️ ${config.label} quota exceeded — falling back to ${MODEL_CONFIG[fallbackModel].label}`);
+        try {
+          return await this._runGeneration(keyword, fallbackModel, options, targetWordCount, true);
+        } catch (fallbackError: any) {
+          logger.error(`❌ Fallback ${MODEL_CONFIG[fallbackModel].label} also failed: ${fallbackError.message}`);
+          throw new Error(`Content generation failed with ${config.label} and fallback ${MODEL_CONFIG[fallbackModel].label}: ${fallbackError.message}`);
         }
       }
 
-      const content = await config.service.generateBlogPost(keyword, serviceOptions);
-
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const actualCredits = Math.ceil(content.wordCount * config.creditMultiplier);
-
-      logger.info(
-        `✅ SUCCESS: ${config.label} generated ${content.wordCount} words in ${duration}s ` +
-        `(${actualCredits} credits used)`
-      );
-
-      return {
-        ...content,
-        model,
-        modelName: config.label,
-        creditsUsed: actualCredits,
-        generationTime: parseFloat(duration)
-      };
-    } catch (error: any) {
       logger.error(`❌ ${config.label} failed: ${error.message}`);
       throw new Error(`Content generation failed with ${config.label}: ${error.message}`);
     }
+  }
+
+  private async _runGeneration(
+    keyword: string,
+    model: AIModel,
+    options: GenerationOptions,
+    targetWordCount: number,
+    isFallback = false
+  ): Promise<any> {
+    const config = MODEL_CONFIG[model];
+    const startTime = Date.now();
+
+    const serviceOptions = { ...options };
+    if (model === 'gemini' || model === 'gemini-pro') {
+      (serviceOptions as any).modelVariant = (config as any).modelVariant;
+      if (model === 'gemini-pro') {
+        (serviceOptions as any).enableGrounding = true;
+      }
+    }
+
+    const content = await config.service.generateBlogPost(keyword, serviceOptions);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    const actualCredits = Math.ceil(content.wordCount * config.creditMultiplier);
+
+    logger.info(
+      `✅ SUCCESS${isFallback ? ' (fallback)' : ''}: ${config.label} generated ${content.wordCount} words in ${duration}s ` +
+      `(${actualCredits} credits used)`
+    );
+
+    return {
+      ...content,
+      model,
+      modelName: config.label,
+      creditsUsed: actualCredits,
+      generationTime: parseFloat(duration),
+      usedFallback: isFallback
+    };
   }
 
   getAvailableModels() {

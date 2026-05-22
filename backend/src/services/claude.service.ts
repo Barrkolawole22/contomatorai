@@ -1,8 +1,10 @@
-// backend/src/services/claude.service.ts - Claude 3.5 Sonnet via Anthropic API
+// backend/src/services/claude.service.ts
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
+
+const CLAUDE_MODEL = 'claude-sonnet-4-5-20251001';
 
 interface GeneratedContent {
   title: string;
@@ -12,7 +14,6 @@ interface GeneratedContent {
 }
 
 interface ContentGenerationOptions {
-  // same as in gemini.service.ts
   tone?: string;
   wordCount?: number;
   targetAudience?: string;
@@ -52,7 +53,7 @@ export class ClaudeService {
       return;
     }
     this.client = new Anthropic({ apiKey });
-    logger.info('Anthropic service initialized (Claude 3.5 Sonnet)');
+    logger.info(`Anthropic service initialized (${CLAUDE_MODEL})`);
   }
 
   async generateBlogPost(
@@ -99,16 +100,13 @@ export class ClaudeService {
     const userPrompt = promptBuilder.buildMasterPrompt(keyword, options, attempt);
 
     const response = await this.client!.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: CLAUDE_MODEL,
       max_tokens: 8192,
       system: systemMessage,
-      messages: [
-        { role: 'user', content: userPrompt }
-      ],
+      messages: [{ role: 'user', content: userPrompt }],
       temperature: 0.7,
     });
 
-    // Claude response content block
     const contentBlock = response.content[0];
     if (!contentBlock || contentBlock.type !== 'text') {
       throw new Error('Claude did not return text');
@@ -119,7 +117,6 @@ export class ClaudeService {
       throw new Error('Generated content too short');
     }
 
-    // Clean up any markdown wrapping
     generatedText = generatedText.replace(/```html\s*/gi, '').replace(/```/g, '');
     const parsed = this.parseContent(generatedText, keyword);
     const wordCount = this.countWords(parsed.content);
@@ -147,12 +144,12 @@ export class ClaudeService {
     if (!this.client) throw new Error('Claude service not initialized');
     try {
       const response = await this.client.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
+        model: CLAUDE_MODEL,
         max_tokens: 5,
         messages: [{ role: 'user', content: 'Test' }],
       });
       if (response.content[0]?.type === 'text') {
-        return { status: 'operational', model: 'claude-3-5-sonnet-20241022' };
+        return { status: 'operational', model: CLAUDE_MODEL };
       }
       throw new Error('No text response');
     } catch (error: any) {
