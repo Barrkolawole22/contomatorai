@@ -1,4 +1,4 @@
-// backend/src/app.ts - Updated with Knowledgebase route
+// backend/src/app.ts
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -36,6 +36,9 @@ import adminSettingsRoutes from './routes/admin-settings.routes';
 
 // Import knowledgebase routes
 import knowledgebaseRoutes from './routes/knowledgebase.routes';
+
+// Import pipeline routes (ADDED HERE)
+import pipelineRoutes from './routes/pipeline.routes';
 
 // === ADD FOR OAUTH ===
 import passport from 'passport';
@@ -222,6 +225,7 @@ app.get('/api/health', (req, res) => {
       adminSettings: true,
       notifications: true,
       knowledgebase: true,
+      pipelines: true,
     },
     uploads: {
       directory: path.join(__dirname, '../uploads'),
@@ -245,6 +249,7 @@ app.use('/api/sitemap', sitemapRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/bulk-content', bulkContentRoutes);
 app.use('/api/knowledgebase', knowledgebaseRoutes);
+app.use('/api/pipelines', pipelineRoutes); // ADDED HERE
 
 // Notifications routes
 app.use('/api/notifications', notificationRoutes);
@@ -269,6 +274,7 @@ logger.info('  - /api/sitemap');
 logger.info('  - /api/scheduler');
 logger.info('  - /api/bulk-content');
 logger.info('  - /api/knowledgebase');
+logger.info('  - /api/pipelines'); // ADDED HERE
 logger.info('  - /api/notifications');
 logger.info('  - /api/admin/wordpress');
 logger.info('  - /api/admin/system');
@@ -296,6 +302,7 @@ app.get('/', (req, res) => {
       scheduler: '/api/scheduler',
       bulkContent: '/api/bulk-content',
       knowledgebase: '/api/knowledgebase',
+      pipelines: '/api/pipelines', // ADDED HERE
       notifications: '/api/notifications',
       health: '/api/health',
     },
@@ -382,6 +389,7 @@ app.use('*', (req, res) => {
       '/api/scheduler',
       '/api/bulk-content',
       '/api/knowledgebase',
+      '/api/pipelines', // ADDED HERE
       '/api/notifications'
     ]
   });

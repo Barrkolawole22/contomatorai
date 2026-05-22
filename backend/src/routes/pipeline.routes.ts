@@ -10,7 +10,7 @@ import logger from '../config/logger';
 const router = express.Router();
 router.use(authMiddleware);
 
-// POST /api/pipeline — create config and schedule cron if active
+// POST /api/pipelines — create config and schedule cron if active
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -27,7 +27,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// GET /api/pipeline — list all configs for the authenticated user
+// GET /api/pipelines — list all configs for the authenticated user
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const configs = await PipelineConfig.find({ userId: req.user!.id });
@@ -37,7 +37,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// PUT /api/pipeline/:id — update config and reschedule cron
+// PUT /api/pipelines/:id — update config and reschedule cron
 router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const config = await PipelineConfig.findOneAndUpdate(
@@ -61,7 +61,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// DELETE /api/pipeline/:id — cancel cron before deleting
+// DELETE /api/pipelines/:id — cancel cron before deleting
 router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     cancelPipelineCron(req.params.id);
@@ -73,8 +73,8 @@ router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// POST /api/pipeline/:id/run — manual trigger
-router.post('/:id/run', async (req: AuthenticatedRequest, res: Response) => {
+// POST /api/pipelines/:id/trigger — manual trigger (CHANGED FROM /run TO /trigger)
+router.post('/:id/trigger', async (req: AuthenticatedRequest, res: Response) => {
   try {
     await autonomousPipeline.runPipeline(req.params.id);
     res.json({ success: true, message: 'Pipeline run started' });
@@ -83,7 +83,7 @@ router.post('/:id/run', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// GET /api/pipeline/:id/runs — run history
+// GET /api/pipelines/:id/runs — run history
 router.get('/:id/runs', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const runs = await PipelineRun.find({ pipelineConfigId: req.params.id }).sort('-runAt');
