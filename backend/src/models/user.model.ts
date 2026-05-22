@@ -29,6 +29,9 @@ interface WordPackagePurchase {
   status: 'pending' | 'completed' | 'failed' | 'refunded';
 }
 
+// Unified plan type to prevent Mongoose validation crashes across different fields
+type PlanName = 'free' | 'basic' | 'pro' | 'agency' | 'enterprise' | 'starter' | 'professional' | 'premium';
+
 export interface IUser extends Document {
   email: string;
   password?: string;
@@ -48,7 +51,7 @@ export interface IUser extends Document {
 
   // Dual-balance billing
   preferredCurrency: 'USD' | 'NGN';
-  subscriptionPlan: 'free' | 'basic' | 'pro' | 'agency';
+  subscriptionPlan: PlanName;
   subscriptionWordBalance: number;
   topupWordBalance: number;
   subscriptionRenewalDate?: Date;
@@ -77,7 +80,7 @@ export interface IUser extends Document {
   loginCount: number;
   lastUsageDate?: Date;
 
-  subscriptionStatus?: 'free' | 'basic' | 'premium' | 'enterprise';
+  subscriptionStatus?: PlanName;
   subscriptionId?: string;
   subscriptionExpiry?: Date;
 
@@ -124,7 +127,7 @@ export interface IUser extends Document {
   };
 
   subscription?: {
-    plan: 'free' | 'starter' | 'professional' | 'enterprise';
+    plan: PlanName;
     status: 'active' | 'inactive' | 'cancelled' | 'past_due';
     stripeCustomerId?: string;
     stripeSubscriptionId?: string;
@@ -199,10 +202,13 @@ const SecuritySchema = new Schema({
   backupCodes: [{ type: String, select: false }],
 }, { _id: false });
 
+// FIXED: Added all possible plan enums to match the seed data and controller
+const allowedPlans = ['free', 'basic', 'pro', 'agency', 'enterprise', 'starter', 'professional', 'premium'];
+
 const SubscriptionSchema = new Schema({
   plan: {
     type: String,
-    enum: ['free', 'starter', 'professional', 'enterprise'],
+    enum: allowedPlans,
     default: 'free',
   },
   status: {
@@ -243,7 +249,6 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       maxlength: [100, 'Name cannot exceed 100 characters'],
     },
 
-    // FIX A1: All three OAuth fields are now independent top-level fields
     googleId: {
       type: String,
       unique: true,
@@ -270,12 +275,10 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       default: 'active',
     },
 
-    // Legacy word credits (preserved for backward compat)
     wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'] },
     totalWordsUsed: { type: Number, default: 0, min: 0 },
     currentMonthUsage: { type: Number, default: 0, min: 0 },
 
-    // NEW: Dual-balance billing fields
     preferredCurrency: {
       type: String,
       enum: ['USD', 'NGN'],
@@ -283,7 +286,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
     },
     subscriptionPlan: {
       type: String,
-      enum: ['free', 'basic', 'pro', 'agency'],
+      enum: allowedPlans, // FIXED
       default: 'free',
     },
     subscriptionWordBalance: { type: Number, default: 0, min: 0 },
@@ -320,7 +323,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
 
     subscriptionStatus: {
       type: String,
-      enum: ['free', 'basic', 'premium', 'enterprise'],
+      enum: allowedPlans, // FIXED
       default: 'free',
     },
     subscriptionId: { type: String, default: undefined },
@@ -434,7 +437,6 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
-// Reset monthly usage if calendar month has changed
 UserSchema.pre<IUser>('save', function (next) {
   if (this.lastUsageDate) {
     const now = new Date();
@@ -511,7 +513,6 @@ UserSchema.methods.parseUserAgent = function (userAgent: string): string {
   return 'Desktop Device';
 };
 
-// Updated: checks all three balance pools
 UserSchema.methods.hasWordCredits = function (wordsNeeded: number = 1): boolean {
   const total =
     (this.subscriptionWordBalance || 0) +
@@ -520,7 +521,6 @@ UserSchema.methods.hasWordCredits = function (wordsNeeded: number = 1): boolean 
   return total >= wordsNeeded;
 };
 
-// Updated: consume subscriptionWordBalance → topupWordBalance → legacy wordCredits
 UserSchema.methods.deductWordCredits = async function (
   wordsUsed: number,
   contentId?: string,
@@ -570,7 +570,6 @@ UserSchema.methods.deductWordCredits = async function (
   return true;
 };
 
-// Updated: routes to subscriptionWordBalance or topupWordBalance based on type
 UserSchema.methods.addWordCredits = async function (
   wordsToAdd: number,
   packageInfo?: any
@@ -583,7 +582,6 @@ UserSchema.methods.addWordCredits = async function (
     this.topupWordBalance = (this.topupWordBalance || 0) + wordsToAdd;
   }
 
-  // Always add to legacy wordCredits for backward compatibility
   this.wordCredits = (this.wordCredits || 0) + wordsToAdd;
 
   if (packageInfo) {
@@ -602,7 +600,6 @@ UserSchema.methods.addWordCredits = async function (
   await this.save();
 };
 
-// NEW: Reset subscription word balance and set renewal date 30 days out
 UserSchema.methods.resetSubscriptionWords = async function (newBalance: number): Promise<void> {
   this.subscriptionWordBalance = newBalance;
   this.subscriptionRenewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
