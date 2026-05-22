@@ -252,7 +252,7 @@ class BillingController {
             { display_name: 'Package', variable_name: 'package_name', value: targetItem.name }
           ]
         },
-        callback_url: `${process.env.FRONTEND_URL}/billing?verify=1`,
+        callback_url: `${process.env.FRONTEND_URL}/dashboard/billing?verify=1`,
         channels: ['card', 'bank', 'ussd', 'mobile_money']
       });
 

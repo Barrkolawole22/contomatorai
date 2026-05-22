@@ -1,10 +1,9 @@
-// backend/src/middleware/auth.middleware.ts - FIXED VERSION
+// backend/src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import User from '../models/user.model';
 
-// FIX: Export interface for use in controllers
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
@@ -27,17 +26,18 @@ export const authMiddleware = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
+    let token: string | undefined;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({
-        success: false,
-        message: 'Access token is required',
-      });
-      return;
+    // 1. Check headers first (Standard for REST APIs)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
     }
 
-    const token = authHeader.substring(7);
+    // 2. ✅ FALLBACK: Check query parameters for EventSource (SSE) requests
+    if (!token && req.query.token) {
+      token = req.query.token as string;
+    }
 
     if (!token) {
       res.status(401).json({
@@ -92,6 +92,7 @@ export const authMiddleware = async (
       return;
     }
 
+    // @ts-ignore - attaching user to standard express Request
     req.user = {
       id: user._id.toString(),
       email: user.email,
@@ -117,13 +118,17 @@ export const optionalAuthMiddleware = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
+    let token: string | undefined;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return next();
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
     }
 
-    const token = authHeader.substring(7);
+    if (!token && req.query.token) {
+      token = req.query.token as string;
+    }
+
     if (!token) return next();
 
     try {
@@ -131,6 +136,7 @@ export const optionalAuthMiddleware = async (
       const user = await User.findById(decoded.userId).select('-password');
 
       if (user && user.status === 'active') {
+        // @ts-ignore
         req.user = {
           id: user._id.toString(),
           email: user.email,
@@ -151,6 +157,7 @@ export const optionalAuthMiddleware = async (
 
 export const requireRole = (roles: string | string[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
+    // @ts-ignore
     if (!req.user) {
       res.status(401).json({
         success: false,
@@ -159,7 +166,8 @@ export const requireRole = (roles: string | string[]) => {
       return;
     }
 
-    const userRole = (req.user as any)?.role;
+    // @ts-ignore
+    const userRole = req.user.role;
     const allowedRoles = Array.isArray(roles) ? roles : [roles];
 
     if (!allowedRoles.includes(userRole)) {
