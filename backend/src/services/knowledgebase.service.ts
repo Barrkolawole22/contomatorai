@@ -8,6 +8,9 @@ import logger from '../config/logger';
 // Projection to exclude the potentially massive chunks array from list queries
 const WITHOUT_CHUNKS = { chunks: 0 } as const;
 
+const MIN_SCORE = 0.15;
+const MAX_CONTEXT_WORDS = 2000;
+
 export class KnowledgebaseService {
   // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -74,8 +77,8 @@ export class KnowledgebaseService {
 
   /**
    * RAG retrieval: embed the topic, score every chunk from the specified docs
-   * using a hybrid cosine + keyword‑overlap algorithm, then return the top‑10
-   * chunks as a formatted string.
+   * using a hybrid cosine + keyword-overlap algorithm, filter by minimum score,
+   * cap total context words, then return the top chunks as a formatted string.
    */
   async retrieveContext(
     userId: string,
@@ -119,12 +122,29 @@ export class KnowledgebaseService {
     if (scored.length === 0) return '';
 
     scored.sort((a, b) => b.score - a.score);
-    const topChunks = scored.slice(0, 15); // increased from 5 to 10
 
-    logger.info(`RAG hybrid scores: ${topChunks.map(c => c.score.toFixed(3)).join(', ')}`);
-    logger.info(`RAG context sample: ${topChunks[0]?.text?.substring(0, 200)}`);
+    // Filter out low-relevance chunks
+    const relevant = scored.filter(c => c.score >= MIN_SCORE).slice(0, 15);
 
-    return topChunks
+    if (relevant.length === 0) {
+      logger.warn(`RAG: all chunks scored below threshold (${MIN_SCORE}), returning empty context`);
+      return '';
+    }
+
+    // Cap total context to avoid bloating the prompt
+    let wordCount = 0;
+    const cappedChunks = relevant.filter(c => {
+      const w = c.text.split(/\s+/).length;
+      if (wordCount + w > MAX_CONTEXT_WORDS) return false;
+      wordCount += w;
+      return true;
+    });
+
+    logger.info(`RAG hybrid scores: ${cappedChunks.map(c => c.score.toFixed(3)).join(', ')}`);
+    logger.info(`RAG context: ${cappedChunks.length} chunks, ~${wordCount} words`);
+    logger.info(`RAG context sample: ${cappedChunks[0]?.text?.substring(0, 200)}`);
+
+    return cappedChunks
       .map((c, i) => `[Source Excerpt ${i + 1}]\n${c.text}`)
       .join('\n\n---\n\n');
   }
