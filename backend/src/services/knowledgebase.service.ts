@@ -119,7 +119,7 @@ export class KnowledgebaseService {
     if (scored.length === 0) return '';
 
     scored.sort((a, b) => b.score - a.score);
-    const topChunks = scored.slice(0, 10); // increased from 5 to 10
+    const topChunks = scored.slice(0, 15); // increased from 5 to 10
 
     logger.info(`RAG hybrid scores: ${topChunks.map(c => c.score.toFixed(3)).join(', ')}`);
     logger.info(`RAG context sample: ${topChunks[0]?.text?.substring(0, 200)}`);

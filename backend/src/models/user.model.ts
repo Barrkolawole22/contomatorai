@@ -1,9 +1,8 @@
-// backend/src/models/user.model.ts - FIXED VERSION
+// backend/src/models/user.model.ts
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 
-// Login history interface
 interface LoginHistoryEntry {
   ip: string;
   location: string;
@@ -12,7 +11,6 @@ interface LoginHistoryEntry {
   userAgent?: string;
 }
 
-// Word usage tracking interface
 interface WordUsageEntry {
   date: Date;
   wordsUsed: number;
@@ -20,7 +18,6 @@ interface WordUsageEntry {
   operation: 'generation' | 'edit' | 'bulk_generation';
 }
 
-// Word package purchase interface
 interface WordPackagePurchase {
   packageId: string;
   packageName: string;
@@ -34,37 +31,40 @@ interface WordPackagePurchase {
 
 export interface IUser extends Document {
   email: string;
-  password?: string; // <-- MADE PASSWORD OPTIONAL
+  password?: string;
   name: string;
   role: 'user' | 'admin' | 'super_admin' | 'moderator';
   status: 'active' | 'inactive' | 'suspended';
-  
-  googleId?: string; // <-- ADDED GOOGLE ID
-  twitterId?: string; // Twitter OAuth ID
-  twitterUsername?: string; // Twitter username
 
-  // ENHANCED: Word-based billing system
+  // OAuth IDs — all independent top-level fields
+  googleId?: string;
+  twitterId?: string;
+  twitterUsername?: string;
+
+  // Legacy word credits (backward compat)
   wordCredits: number;
   totalWordsUsed: number;
   currentMonthUsage: number;
-  
-  // Word usage tracking
+
+  // Dual-balance billing
+  preferredCurrency: 'USD' | 'NGN';
+  subscriptionPlan: 'free' | 'basic' | 'pro' | 'agency';
+  subscriptionWordBalance: number;
+  topupWordBalance: number;
+  subscriptionRenewalDate?: Date;
+
   wordUsageHistory: WordUsageEntry[];
   wordPackagePurchases: WordPackagePurchase[];
-  
-  // Legacy credits for backward compatibility
+
   credits: number;
-  
-  // Password reset fields
+
   resetPasswordToken?: string;
   resetPasswordExpiry?: Date;
-  
-  // Email verification fields
+
   emailVerified: boolean;
   emailVerificationToken?: string;
   emailVerificationExpiry?: Date;
-  
-  // Profile fields
+
   avatar?: string;
   timezone?: string;
   language?: string;
@@ -72,26 +72,22 @@ export interface IUser extends Document {
   location?: string;
   company?: string;
   bio?: string;
-  
-  // Usage tracking
+
   lastLogin?: Date;
   loginCount: number;
-  lastUsageDate?: Date; // FIX: Added for monthly usage tracking
-  
-  // Subscription/billing
+  lastUsageDate?: Date;
+
   subscriptionStatus?: 'free' | 'basic' | 'premium' | 'enterprise';
   subscriptionId?: string;
   subscriptionExpiry?: Date;
-  
-  // BYOAPI settings (for future feature)
+
   byoApiEnabled?: boolean;
   apiKeys?: {
     openai?: string;
     anthropic?: string;
     gemini?: string;
   };
-  
-  // Security tracking
+
   security: {
     twoFactorEnabled: boolean;
     lastPasswordChange: Date;
@@ -99,8 +95,7 @@ export interface IUser extends Document {
     twoFactorSecret?: string;
     backupCodes?: string[];
   };
-  
-  // Comprehensive preferences
+
   preferences: {
     emailNotifications: boolean;
     marketingEmails: boolean;
@@ -127,8 +122,7 @@ export interface IUser extends Document {
     lastPasswordChange?: Date;
     twoFactorEnabled?: boolean;
   };
-  
-  // Subscription details
+
   subscription?: {
     plan: 'free' | 'starter' | 'professional' | 'enterprise';
     status: 'active' | 'inactive' | 'cancelled' | 'past_due';
@@ -139,11 +133,10 @@ export interface IUser extends Document {
     expiresAt?: Date;
     cancelAtPeriodEnd?: boolean;
   };
-  
-  // Timestamps
+
   createdAt: Date;
   updatedAt: Date;
-  
+
   // Instance methods
   comparePassword(candidatePassword: string): Promise<boolean>;
   generatePasswordResetToken(): string;
@@ -152,6 +145,7 @@ export interface IUser extends Document {
   hasWordCredits(wordsNeeded?: number): boolean;
   deductWordCredits(wordsUsed: number, contentId?: string, operation?: string): Promise<boolean>;
   addWordCredits(wordsToAdd: number, packageInfo?: any): Promise<void>;
+  resetSubscriptionWords(newBalance: number): Promise<void>;
   getWordUsageStats(timeframe?: 'day' | 'week' | 'month' | 'all'): any;
   resetMonthlyUsage(): Promise<void>;
   hasCredits(): boolean;
@@ -161,74 +155,70 @@ export interface IUser extends Document {
   parseUserAgent(userAgent: string): string;
 }
 
-// ... (WordUsageSchema, WordPackagePurchaseSchema, LoginHistorySchema, SecuritySchema, SubscriptionSchema remain unchanged) ...
+// ─── Sub-schemas ────────────────────────────────────────────────────────────
 
-// Word Usage Schema
 const WordUsageSchema = new Schema({
   date: { type: Date, default: Date.now },
   wordsUsed: { type: Number, required: true, min: 0 },
   contentId: { type: String },
-  operation: { 
-    type: String, 
+  operation: {
+    type: String,
     enum: ['generation', 'edit', 'bulk_generation'],
-    default: 'generation'
-  }
+    default: 'generation',
+  },
 }, { _id: false });
 
-// Word Package Purchase Schema
 const WordPackagePurchaseSchema = new Schema({
   packageId: { type: String, required: true },
   packageName: { type: String, required: true },
   wordsIncluded: { type: Number, required: true, min: 0 },
   amountPaid: { type: Number, required: true, min: 0 },
-  currency: { type: String, default: 'USD' },
+  currency: { type: String, default: 'NGN' },
   purchaseDate: { type: Date, default: Date.now },
   stripePaymentIntentId: { type: String },
   status: {
     type: String,
     enum: ['pending', 'completed', 'failed', 'refunded'],
-    default: 'pending'
-  }
+    default: 'pending',
+  },
 }, { _id: false });
 
-// Login History Schema
 const LoginHistorySchema = new Schema({
   ip: { type: String, required: true },
   location: { type: String, default: 'Unknown' },
   timestamp: { type: Date, default: Date.now },
   device: { type: String, default: 'Unknown' },
-  userAgent: { type: String }
+  userAgent: { type: String },
 }, { _id: false });
 
-// Security Schema
 const SecuritySchema = new Schema({
   twoFactorEnabled: { type: Boolean, default: false },
   lastPasswordChange: { type: Date, default: Date.now },
   loginHistory: [LoginHistorySchema],
   twoFactorSecret: { type: String, select: false },
-  backupCodes: [{ type: String, select: false }]
+  backupCodes: [{ type: String, select: false }],
 }, { _id: false });
 
-// Subscription Schema
 const SubscriptionSchema = new Schema({
-  plan: { 
-    type: String, 
-    enum: ['free', 'starter', 'professional', 'enterprise'], 
-    default: 'free' 
+  plan: {
+    type: String,
+    enum: ['free', 'starter', 'professional', 'enterprise'],
+    default: 'free',
   },
-  status: { 
-    type: String, 
-    enum: ['active', 'inactive', 'cancelled', 'past_due'], 
-    default: 'inactive' 
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'cancelled', 'past_due'],
+    default: 'inactive',
   },
   stripeCustomerId: { type: String },
   stripeSubscriptionId: { type: String },
   currentPeriodStart: { type: Date },
   currentPeriodEnd: { type: Date },
   expiresAt: { type: Date },
-  cancelAtPeriodEnd: { type: Boolean, default: false }
+  cancelAtPeriodEnd: { type: Boolean, default: false },
 }, { _id: false });
 
+// ─── Main schema ─────────────────────────────────────────────────────────────
 
 const UserSchema: Schema<IUser> = new Schema<IUser>(
   {
@@ -242,8 +232,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
     },
     password: {
       type: String,
-      // User may not have a password if using Google OAuth
-      required: false, // <-- CHANGED FROM TRUE
+      required: false,
       minlength: [6, 'Password must be at least 6 characters long'],
       select: false,
     },
@@ -253,162 +242,106 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       trim: true,
       maxlength: [100, 'Name cannot exceed 100 characters'],
     },
+
+    // FIX A1: All three OAuth fields are now independent top-level fields
     googleId: {
       type: String,
       unique: true,
+      sparse: true,
+    },
     twitterId: {
       type: String,
       unique: true,
-      sparse: true, // Allows multiple docs to have no twitterId
+      sparse: true,
     },
     twitterUsername: {
       type: String,
       sparse: true,
     },
-      sparse: true, // <-- Allows multiple docs to have no googleId
-    },
+
     role: {
       type: String,
-      enum: {
-        values: ['user', 'admin', 'super_admin', 'moderator'],
-        message: 'Role must be one of: user, admin, super_admin, moderator'
-      },
+      enum: { values: ['user', 'admin', 'super_admin', 'moderator'], message: 'Invalid role' },
       default: 'user',
     },
     status: {
       type: String,
-      enum: {
-        values: ['active', 'inactive', 'suspended'],
-        message: 'Status must be one of: active, inactive, suspended'
-      },
+      enum: { values: ['active', 'inactive', 'suspended'], message: 'Invalid status' },
       default: 'active',
     },
-    wordCredits: {
-      type: Number,
-      default: 5000,
-      min: [0, 'Word credits cannot be negative'],
+
+    // Legacy word credits (preserved for backward compat)
+    wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'] },
+    totalWordsUsed: { type: Number, default: 0, min: 0 },
+    currentMonthUsage: { type: Number, default: 0, min: 0 },
+
+    // NEW: Dual-balance billing fields
+    preferredCurrency: {
+      type: String,
+      enum: ['USD', 'NGN'],
+      default: 'NGN',
     },
-    totalWordsUsed: {
-      type: Number,
-      default: 0,
-      min: [0, 'Total words used cannot be negative'],
+    subscriptionPlan: {
+      type: String,
+      enum: ['free', 'basic', 'pro', 'agency'],
+      default: 'free',
     },
-    currentMonthUsage: {
-      type: Number,
-      default: 0,
-      min: [0, 'Current month usage cannot be negative'],
-    },
+    subscriptionWordBalance: { type: Number, default: 0, min: 0 },
+    topupWordBalance: { type: Number, default: 0, min: 0 },
+    subscriptionRenewalDate: { type: Date, default: undefined },
+
     wordUsageHistory: [WordUsageSchema],
     wordPackagePurchases: [WordPackagePurchaseSchema],
-    credits: {
-      type: Number,
-      default: 10,
-      min: [0, 'Credits cannot be negative'],
-      max: [10000, 'Credits cannot exceed 10,000'],
-    },
-    resetPasswordToken: {
-      type: String,
-      default: undefined,
-    },
-    resetPasswordExpiry: {
-      type: Date,
-      default: undefined,
-    },
-    emailVerified: {
-      type: Boolean,
-      default: false,
-    },
-    emailVerificationToken: {
-      type: String,
-      default: undefined,
-    },
-    emailVerificationExpiry: {
-      type: Date,
-      default: undefined,
-    },
-    avatar: {
-      type: String,
-      default: undefined,
-    },
-    timezone: {
-      type: String,
-      default: 'UTC',
-    },
+
+    credits: { type: Number, default: 10, min: 0, max: 10000 },
+
+    resetPasswordToken: { type: String, default: undefined },
+    resetPasswordExpiry: { type: Date, default: undefined },
+
+    emailVerified: { type: Boolean, default: false },
+    emailVerificationToken: { type: String, default: undefined },
+    emailVerificationExpiry: { type: Date, default: undefined },
+
+    avatar: { type: String, default: undefined },
+    timezone: { type: String, default: 'UTC' },
     language: {
       type: String,
       default: 'en',
       enum: ['en', 'es', 'fr', 'de', 'it', 'pt', 'zh', 'ja'],
     },
-    phone: {
-      type: String,
-      trim: true,
-      maxlength: [20, 'Phone number cannot exceed 20 characters']
-    },
-    location: {
-      type: String,
-      trim: true,
-      maxlength: [100, 'Location cannot exceed 100 characters']
-    },
-    company: {
-      type: String,
-      trim: true,
-      maxlength: [100, 'Company name cannot exceed 100 characters']
-    },
-    bio: {
-      type: String,
-      trim: true,
-      maxlength: [500, 'Bio cannot exceed 500 characters']
-    },
-    lastLogin: {
-      type: Date,
-      default: undefined,
-    },
-    loginCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    lastUsageDate: { // FIX: Added field
-      type: Date,
-      default: undefined,
-    },
+    phone: { type: String, trim: true, maxlength: 20 },
+    location: { type: String, trim: true, maxlength: 100 },
+    company: { type: String, trim: true, maxlength: 100 },
+    bio: { type: String, trim: true, maxlength: 500 },
+
+    lastLogin: { type: Date, default: undefined },
+    loginCount: { type: Number, default: 0, min: 0 },
+    lastUsageDate: { type: Date, default: undefined },
+
     subscriptionStatus: {
       type: String,
       enum: ['free', 'basic', 'premium', 'enterprise'],
       default: 'free',
     },
-    subscriptionId: {
-      type: String,
-      default: undefined,
-    },
-    subscriptionExpiry: {
-      type: Date,
-      default: undefined,
-    },
-    byoApiEnabled: {
-      type: Boolean,
-      default: false,
-    },
+    subscriptionId: { type: String, default: undefined },
+    subscriptionExpiry: { type: Date, default: undefined },
+
+    byoApiEnabled: { type: Boolean, default: false },
     apiKeys: {
       openai: { type: String, select: false },
       anthropic: { type: String, select: false },
       gemini: { type: String, select: false },
     },
+
     security: {
       type: SecuritySchema,
-      default: () => ({
-        twoFactorEnabled: false,
-        lastPasswordChange: new Date(),
-        loginHistory: []
-      })
+      default: () => ({ twoFactorEnabled: false, lastPasswordChange: new Date(), loginHistory: [] }),
     },
     subscription: {
       type: SubscriptionSchema,
-      default: () => ({
-        plan: 'free',
-        status: 'inactive'
-      })
+      default: () => ({ plan: 'free', status: 'inactive' }),
     },
+
     preferences: {
       emailNotifications: { type: Boolean, default: true },
       marketingEmails: { type: Boolean, default: false },
@@ -417,22 +350,14 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
         default: 'informative',
         enum: ['informative', 'conversational', 'professional', 'friendly', 'authoritative'],
       },
-      defaultWordCount: {
-        type: Number,
-        default: 1500,
-        min: 300,
-        max: 5000,
-      },
+      defaultWordCount: { type: Number, default: 1500, min: 300, max: 5000 },
       website: {
         type: String,
         default: '',
         validate: {
-          validator: function(v: string) {
-            if (!v || v.trim() === '') return true;
-            return /^https?:\/\/.+/.test(v);
-          },
-          message: 'Website must be a valid URL'
-        }
+          validator: (v: string) => !v || v.trim() === '' || /^https?:\/\/.+/.test(v),
+          message: 'Website must be a valid URL',
+        },
       },
       pushNotifications: { type: Boolean, default: false },
       weeklyReports: { type: Boolean, default: true },
@@ -440,11 +365,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       articleUpdates: { type: Boolean, default: false },
       securityAlerts: { type: Boolean, default: true },
       contentUpdates: { type: Boolean, default: true },
-      theme: {
-        type: String,
-        enum: ['system', 'light', 'dark'],
-        default: 'system',
-      },
+      theme: { type: String, enum: ['system', 'light', 'dark'], default: 'system' },
       defaultContentType: {
         type: String,
         enum: ['blog', 'article', 'social', 'email', 'product', 'landing'],
@@ -453,22 +374,14 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       autoSave: { type: Boolean, default: true },
       wordCountDisplay: { type: Boolean, default: true },
       apiKey: { type: String, default: undefined },
-      rateLimit: {
-        type: Number,
-        default: 100,
-        min: 1,
-        max: 1000,
-      },
+      rateLimit: { type: Number, default: 100, min: 1, max: 1000 },
       webhookUrl: {
         type: String,
         default: '',
         validate: {
-          validator: function(v: string) {
-            if (!v || v.trim() === '') return true;
-            return /^https?:\/\/.+/.test(v);
-          },
-          message: 'Webhook URL must be a valid HTTP/HTTPS URL'
-        }
+          validator: (v: string) => !v || v.trim() === '' || /^https?:\/\/.+/.test(v),
+          message: 'Webhook URL must be a valid HTTP/HTTPS URL',
+        },
       },
       enableWebhooks: { type: Boolean, default: false },
       bio: { type: String, default: '' },
@@ -476,10 +389,10 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       location: { type: String, default: '' },
     },
   },
-  { 
+  {
     timestamps: true,
     toJSON: {
-      transform: function(doc, ret) {
+      transform: function (doc, ret) {
         delete ret.password;
         delete ret.resetPasswordToken;
         delete ret.emailVerificationToken;
@@ -487,32 +400,31 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
         if (ret.apiKeys) delete ret.apiKeys;
         if (ret.preferences?.apiKey) {
           ret.preferences.apiKey = ret.preferences.apiKey.substring(0, 12) + '...';
-UserSchema.index({ twitterId: 1 }); // Index for Twitter OAuth
         }
         if (ret.security?.twoFactorSecret) delete ret.security.twoFactorSecret;
         if (ret.security?.backupCodes) delete ret.security.backupCodes;
         return ret;
-      }
-    }
+      },
+    },
   }
 );
 
-// Indexes
-UserSchema.index({ googleId: 1 }); // <-- ADDED INDEX
+// ─── Indexes ─────────────────────────────────────────────────────────────────
+
+UserSchema.index({ googleId: 1 });
+UserSchema.index({ twitterId: 1 });
 UserSchema.index({ resetPasswordToken: 1 });
 UserSchema.index({ emailVerificationToken: 1 });
 UserSchema.index({ role: 1, status: 1 });
 UserSchema.index({ createdAt: -1 });
 UserSchema.index({ wordCredits: 1 });
 UserSchema.index({ totalWordsUsed: 1 });
+UserSchema.index({ subscriptionPlan: 1 });
 
-// Hash password before saving
+// ─── Hooks ───────────────────────────────────────────────────────────────────
+
 UserSchema.pre<IUser>('save', async function (next) {
-  // Only hash if password is provided and modified
-  if (!this.isModified('password') || !this.password) { // <-- UPDATED THIS LINE
-    return next();
-  }
-  
+  if (!this.isModified('password') || !this.password) return next();
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
@@ -522,34 +434,42 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
-// ... (Initialize defaults 'pre' hook remains unchanged) ...
-
-// Instance methods
-UserSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
-  if (!this.password) { // <-- ADDED CHECK
-    return false;
+// Reset monthly usage if calendar month has changed
+UserSchema.pre<IUser>('save', function (next) {
+  if (this.lastUsageDate) {
+    const now = new Date();
+    const last = new Date(this.lastUsageDate);
+    if (now.getMonth() !== last.getMonth() || now.getFullYear() !== last.getFullYear()) {
+      this.currentMonthUsage = 0;
+    }
   }
+  this.lastUsageDate = new Date();
+  next();
+});
+
+// ─── Instance methods ─────────────────────────────────────────────────────────
+
+UserSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
+  if (!this.password) return false;
   try {
     return await bcrypt.compare(candidatePassword, this.password);
-  } catch (error) {
+  } catch {
     throw new Error('Password comparison failed');
   }
 };
 
-// ... (Rest of the instance methods remain unchanged) ...
-
 UserSchema.methods.generatePasswordResetToken = function (): string {
-  const resetToken = randomBytes(32).toString('hex');
-  this.resetPasswordToken = resetToken;
-  this.resetPasswordExpiry = new Date(Date.now() + 3600000);
-  return resetToken;
+  const token = randomBytes(32).toString('hex');
+  this.resetPasswordToken = token;
+  this.resetPasswordExpiry = new Date(Date.now() + 3_600_000);
+  return token;
 };
 
 UserSchema.methods.generateEmailVerificationToken = function (): string {
-  const verificationToken = randomBytes(32).toString('hex');
-  this.emailVerificationToken = verificationToken;
-  this.emailVerificationExpiry = new Date(Date.now() + 86400000);
-  return verificationToken;
+  const token = randomBytes(32).toString('hex');
+  this.emailVerificationToken = token;
+  this.emailVerificationExpiry = new Date(Date.now() + 86_400_000);
+  return token;
 };
 
 UserSchema.methods.updateLastLogin = async function (): Promise<void> {
@@ -558,22 +478,21 @@ UserSchema.methods.updateLastLogin = async function (): Promise<void> {
   await this.save();
 };
 
-UserSchema.methods.addLoginHistory = async function (ip: string, userAgent: string, location?: string): Promise<void> {
-  const loginEntry = {
+UserSchema.methods.addLoginHistory = async function (
+  ip: string,
+  userAgent: string,
+  location?: string
+): Promise<void> {
+  const entry = {
     ip,
     location: location || 'Unknown',
     timestamp: new Date(),
     device: this.parseUserAgent(userAgent),
-    userAgent
+    userAgent,
   };
-
-  if (!this.security.loginHistory) {
-    this.security.loginHistory = [];
-  }
-  
-  this.security.loginHistory.unshift(loginEntry);
+  if (!this.security.loginHistory) this.security.loginHistory = [];
+  this.security.loginHistory.unshift(entry);
   this.security.loginHistory = this.security.loginHistory.slice(0, 20);
-  
   this.lastLogin = new Date();
   this.loginCount += 1;
   await this.save();
@@ -592,61 +511,108 @@ UserSchema.methods.parseUserAgent = function (userAgent: string): string {
   return 'Desktop Device';
 };
 
+// Updated: checks all three balance pools
 UserSchema.methods.hasWordCredits = function (wordsNeeded: number = 1): boolean {
-  return this.wordCredits >= wordsNeeded;
+  const total =
+    (this.subscriptionWordBalance || 0) +
+    (this.topupWordBalance || 0) +
+    (this.wordCredits || 0);
+  return total >= wordsNeeded;
 };
 
+// Updated: consume subscriptionWordBalance → topupWordBalance → legacy wordCredits
 UserSchema.methods.deductWordCredits = async function (
-  wordsUsed: number, 
-  contentId?: string, 
+  wordsUsed: number,
+  contentId?: string,
   operation: string = 'generation'
 ): Promise<boolean> {
-  if (this.wordCredits < wordsUsed) {
-    return false;
+  const subscriptionBalance = this.subscriptionWordBalance || 0;
+  const topupBalance = this.topupWordBalance || 0;
+  const legacyBalance = this.wordCredits || 0;
+
+  if (subscriptionBalance + topupBalance + legacyBalance < wordsUsed) return false;
+
+  let remaining = wordsUsed;
+
+  if (remaining > 0 && subscriptionBalance > 0) {
+    const deduct = Math.min(remaining, subscriptionBalance);
+    this.subscriptionWordBalance -= deduct;
+    remaining -= deduct;
   }
-  
-  this.wordCredits -= wordsUsed;
+
+  if (remaining > 0 && topupBalance > 0) {
+    const deduct = Math.min(remaining, topupBalance);
+    this.topupWordBalance -= deduct;
+    remaining -= deduct;
+  }
+
+  if (remaining > 0 && legacyBalance > 0) {
+    const deduct = Math.min(remaining, legacyBalance);
+    this.wordCredits -= deduct;
+    remaining -= deduct;
+  }
+
   this.totalWordsUsed += wordsUsed;
   this.currentMonthUsage += wordsUsed;
-  
+
   this.wordUsageHistory.push({
     date: new Date(),
     wordsUsed,
     contentId,
-    operation: operation as any
+    operation: operation as any,
   });
-  
+
   if (this.wordUsageHistory.length > 1000) {
     this.wordUsageHistory = this.wordUsageHistory.slice(-1000);
   }
-  
+
   await this.save();
   return true;
 };
 
-UserSchema.methods.addWordCredits = async function (wordsToAdd: number, packageInfo?: any): Promise<void> {
-  this.wordCredits += wordsToAdd;
-  
+// Updated: routes to subscriptionWordBalance or topupWordBalance based on type
+UserSchema.methods.addWordCredits = async function (
+  wordsToAdd: number,
+  packageInfo?: any
+): Promise<void> {
+  const type = packageInfo?.type;
+
+  if (type === 'subscription') {
+    this.subscriptionWordBalance = (this.subscriptionWordBalance || 0) + wordsToAdd;
+  } else if (type === 'topup') {
+    this.topupWordBalance = (this.topupWordBalance || 0) + wordsToAdd;
+  }
+
+  // Always add to legacy wordCredits for backward compatibility
+  this.wordCredits = (this.wordCredits || 0) + wordsToAdd;
+
   if (packageInfo) {
     this.wordPackagePurchases.push({
       packageId: packageInfo.packageId,
       packageName: packageInfo.packageName,
       wordsIncluded: wordsToAdd,
       amountPaid: packageInfo.amountPaid,
-      currency: packageInfo.currency || 'USD',
+      currency: packageInfo.currency || 'NGN',
       purchaseDate: new Date(),
       stripePaymentIntentId: packageInfo.stripePaymentIntentId,
-      status: packageInfo.status || 'completed'
+      status: packageInfo.status || 'completed',
     });
   }
-  
+
+  await this.save();
+};
+
+// NEW: Reset subscription word balance and set renewal date 30 days out
+UserSchema.methods.resetSubscriptionWords = async function (newBalance: number): Promise<void> {
+  this.subscriptionWordBalance = newBalance;
+  this.subscriptionRenewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   await this.save();
 };
 
 UserSchema.methods.getWordUsageStats = function (timeframe: string = 'month') {
   const now = new Date();
   let startDate: Date;
-  
+
   switch (timeframe) {
     case 'day':
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -660,22 +626,11 @@ UserSchema.methods.getWordUsageStats = function (timeframe: string = 'month') {
     default:
       startDate = new Date(0);
   }
-  
-  const relevantUsage = this.wordUsageHistory.filter(
-    (entry: any) => entry.date >= startDate
-  );
-  
-  const totalWords = relevantUsage.reduce(
-    (sum: number, entry: any) => sum + entry.wordsUsed, 0
-  );
-  
-  return {
-    totalWords,
-    usageEntries: relevantUsage.length,
-    timeframe,
-    startDate,
-    endDate: now
-  };
+
+  const relevant = this.wordUsageHistory.filter((e: any) => e.date >= startDate);
+  const totalWords = relevant.reduce((sum: number, e: any) => sum + e.wordsUsed, 0);
+
+  return { totalWords, usageEntries: relevant.length, timeframe, startDate, endDate: now };
 };
 
 UserSchema.methods.resetMonthlyUsage = async function (): Promise<void> {
@@ -688,22 +643,18 @@ UserSchema.methods.hasCredits = function (): boolean {
 };
 
 UserSchema.methods.deductCredits = async function (amount: number = 1): Promise<boolean> {
-  if (this.credits < amount) {
-    return false;
-  }
-  
+  if (this.credits < amount) return false;
   this.credits -= amount;
   await this.save();
   return true;
 };
 
 UserSchema.methods.addCredits = async function (amount: number): Promise<void> {
-  this.credits += amount;
-  if (this.credits > 10000) {
-    this.credits = 10000;
-  }
+  this.credits = Math.min(this.credits + amount, 10000);
   await this.save();
 };
+
+// ─── Statics ─────────────────────────────────────────────────────────────────
 
 UserSchema.statics.findByEmail = function (email: string) {
   return this.findOne({ email: email.toLowerCase() });
@@ -717,27 +668,27 @@ UserSchema.statics.findUsersWithWordCredits = function () {
   return this.find({ wordCredits: { $gt: 0 }, status: 'active' });
 };
 
-UserSchema.virtual('displayName').get(function () {
-  return this.name;
-});
+// ─── Virtuals ─────────────────────────────────────────────────────────────────
 
-UserSchema.virtual('isAdmin').get(function () {
-  return ['admin', 'super_admin'].includes(this.role);
-});
-
+UserSchema.virtual('displayName').get(function () { return this.name; });
+UserSchema.virtual('isAdmin').get(function () { return ['admin', 'super_admin'].includes(this.role); });
 UserSchema.virtual('hasActiveSubscription').get(function () {
   if (this.subscriptionStatus === 'free') return true;
   if (!this.subscriptionExpiry) return false;
   return this.subscriptionExpiry > new Date();
 });
-
 UserSchema.virtual('wordCreditsStatus').get(function () {
   return {
     current: this.wordCredits,
+    subscriptionBalance: this.subscriptionWordBalance || 0,
+    topupBalance: this.topupWordBalance || 0,
+    totalAvailable:
+      (this.subscriptionWordBalance || 0) + (this.topupWordBalance || 0) + (this.wordCredits || 0),
     totalUsed: this.totalWordsUsed,
     monthUsed: this.currentMonthUsage,
-    hasCredits: this.wordCredits > 0,
-    needsRefill: this.wordCredits < 1000
+    hasCredits: this.hasWordCredits(),
+    needsRefill:
+      (this.subscriptionWordBalance || 0) + (this.topupWordBalance || 0) < 1000,
   };
 });
 

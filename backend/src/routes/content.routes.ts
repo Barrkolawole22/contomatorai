@@ -169,8 +169,8 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    const validModels: AIModel[] = ['groq', 'gemini', 'claude'];
-    const selectedModel = validModels.includes(model as AIModel) ? (model as AIModel) : 'groq';
+    const validModels: AIModel[] = ['gemini', 'gemini-pro', 'gpt4o', 'claude'];
+    const selectedModel = validModels.includes(model as AIModel) ? (model as AIModel) : 'gemini';
 
     const targetWordCount = options.wordCount || 1500;
 
@@ -263,6 +263,7 @@ router.post('/generate', async (req: AuthenticatedRequest, res: Response) => {
         internalLinkSuggestions: options.internalLinkSuggestions,
         maxInternalLinks: options.maxInternalLinks,
         internalLinkDensity: options.internalLinkDensity,
+        includeExternalLinks: options.includeExternalLinks || false,
       }
     );
 

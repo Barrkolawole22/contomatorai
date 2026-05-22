@@ -170,7 +170,7 @@ router.post('/estimate', async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
     if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
-    const { count, wordCount = 1500, model = 'groq' } = req.body;
+    const { count, wordCount = 1500, model = 'gemini' } = req.body;
     if (!count || count <= 0) {
       res.status(400).json({ success: false, message: 'count must be a positive number' });
       return;

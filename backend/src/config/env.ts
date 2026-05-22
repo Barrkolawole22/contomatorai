@@ -1,70 +1,58 @@
-// backend/src/config/env.ts - FIXED
 import { z } from 'zod';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const envSchema = z.object({
-  // Server Configuration
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().min(1).max(65535).default(5000),
 
-  // Database Configuration
+  ANTHROPIC_API_KEY: z.string().optional(),
+  NEWS_API_KEY: z.string().optional(),
+
   MONGODB_URI: z.string().url('Invalid MongoDB URI').default('mongodb://localhost:27017/content-automation'),
   MONGODB_TEST_URI: z.string().url('Invalid MongoDB test URI').optional(),
 
-  // JWT Configuration
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters long'),
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters long').optional(),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
-  // Frontend Configuration
   FRONTEND_URL: z.string().url('Invalid frontend URL').default('http://localhost:3000'),
 
-  // AI Service Configuration - FIXED: All optional now
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o'),
   OPENAI_MAX_TOKENS: z.coerce.number().positive().default(4000),
   OPENAI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.8),
 
-  // Gemini Configuration - FIXED: Optional
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-pro'),
 
-  // Groq Configuration - FIXED: Optional
   GROQ_API_KEY: z.string().optional(),
   GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
 
-  // Hugging Face Configuration - FIXED: Optional
   HUGGINGFACE_API_KEY: z.string().optional(),
   HUGGINGFACE_MODEL: z.string().default('meta-llama/Meta-Llama-3.1-8B-Instruct'),
 
-  // Rate Limiting Configuration
   RATE_LIMIT_WINDOW_MS: z.coerce.number().positive().default(15 * 60 * 1000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().positive().default(100),
   RATE_LIMIT_SKIP_FAILED_REQUESTS: z.coerce.boolean().default(false),
 
-  // Logging Configuration
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
   LOG_FORMAT: z.enum(['json', 'simple', 'combined']).default('simple'),
 
-  // WordPress Integration
   WORDPRESS_TEST_URL: z.string().url('Invalid WordPress URL').optional(),
   WORDPRESS_TEST_USERNAME: z.string().min(1).optional(),
   WORDPRESS_TEST_PASSWORD: z.string().min(1).optional(),
   WORDPRESS_PLUGIN_API_KEY: z.string().optional(),
 
-  // Paystack Configuration
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
 
-  // Security Configuration
   SALT_WORK_FACTOR: z.coerce.number().min(8).max(15).default(12),
   CORS_ORIGIN: z.string().default('*'),
   SESSION_SECRET: z.string().min(32).optional(),
 
-  // Email Configuration
   EMAIL_FROM: z.string().email('Invalid email address').optional(),
   EMAIL_FROM_NAME: z.string().optional().default('ContentAI Pro'),
   EMAIL_SERVICE: z.enum(['gmail', 'outlook', 'yahoo', 'custom']).optional(),
@@ -74,25 +62,20 @@ const envSchema = z.object({
   EMAIL_PASS: z.string().optional(),
   EMAIL_SECURE: z.coerce.boolean().default(true),
 
-  // === GOOGLE OAUTH ===
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_CALLBACK_URL: z.string().url('Invalid Google callback URL').optional(), // <-- ADDED
+  GOOGLE_CALLBACK_URL: z.string().url('Invalid Google callback URL').optional(),
 
-  // === TWITTER OAUTH ===
   TWITTER_CONSUMER_KEY: z.string().optional(),
   TWITTER_CONSUMER_SECRET: z.string().optional(),
   TWITTER_CALLBACK_URL: z.string().url().optional(),
 
-  // === BREVO EMAIL API ===
   BREVO_API_KEY: z.string().optional(),
 
-  // Redis Configuration
   REDIS_URL: z.string().url('Invalid Redis URL').optional(),
   REDIS_PASSWORD: z.string().optional(),
   REDIS_DB: z.coerce.number().min(0).max(15).default(0),
 
-  // File Upload Configuration
   MAX_FILE_SIZE: z.coerce.number().positive().default(10 * 1024 * 1024),
   UPLOAD_PATH: z.string().default('./uploads'),
   ALLOWED_FILE_TYPES: z.string().default('jpg,jpeg,png,pdf,doc,docx'),
@@ -100,11 +83,9 @@ const envSchema = z.object({
   AVATAR_ALLOWED_TYPES: z.string().default('jpg,jpeg,png,gif,webp'),
   PRODUCTION_URL: z.string().url().optional(),
 
-  // Monitoring & Analytics
   SENTRY_DSN: z.string().url('Invalid Sentry DSN').optional(),
   ANALYTICS_ID: z.string().optional(),
 
-  // Feature Flags
   ENABLE_REGISTRATION: z.coerce.boolean().default(true),
   ENABLE_EMAIL_VERIFICATION: z.coerce.boolean().default(false),
   ENABLE_RATE_LIMITING: z.coerce.boolean().default(true),
@@ -114,11 +95,9 @@ const envSchema = z.object({
   ENABLE_LEGACY_CREDITS: z.coerce.boolean().default(true),
   BYOAPI_FEATURE_ENABLED: z.coerce.boolean().default(false),
 
-  // Word Package Settings
   DEFAULT_FREE_WORD_CREDITS: z.coerce.number().default(5000),
   MINIMUM_WORD_CREDITS_ALERT: z.coerce.number().default(1000),
 
-  // Admin Configuration
   ADMIN_EMAIL: z.string().email('Invalid admin email').optional(),
   ADMIN_PASSWORD: z.string().min(6, 'Admin password must be at least 6 characters').optional(),
   ENABLE_ADMIN_CREATION: z.coerce.boolean().default(true),
@@ -133,13 +112,11 @@ try {
   env = envSchema.parse(process.env);
 } catch (error) {
   console.error('❌ Environment validation failed:');
-  
   if (error instanceof z.ZodError) {
     error.errors.forEach((err) => {
       console.error(`  • ${err.path.join('.')}: ${err.message}`);
     });
   }
-  
   console.error('\n💡 Please check your .env file and ensure all required variables are set correctly.');
   process.exit(1);
 }
@@ -152,23 +129,16 @@ export const isProduction = () => env.NODE_ENV === 'production';
 export const isTest = () => env.NODE_ENV === 'test';
 
 export const getDatabaseUri = () => {
-  if (isTest() && env.MONGODB_TEST_URI) {
-    return env.MONGODB_TEST_URI;
-  }
+  if (isTest() && env.MONGODB_TEST_URI) return env.MONGODB_TEST_URI;
   return env.MONGODB_URI;
 };
 
-export const isEmailConfigured = () => {
-  return !!(env.EMAIL_FROM && env.EMAIL_SERVICE && env.EMAIL_USER && env.EMAIL_PASS);
-};
+export const isEmailConfigured = () =>
+  !!(env.EMAIL_FROM && env.EMAIL_SERVICE && env.EMAIL_USER && env.EMAIL_PASS);
 
-export const isRedisConfigured = () => {
-  return !!env.REDIS_URL;
-};
+export const isRedisConfigured = () => !!env.REDIS_URL;
 
-export const isAdminConfigured = () => {
-  return !!(env.ADMIN_EMAIL && env.ADMIN_PASSWORD);
-};
+export const isAdminConfigured = () => !!(env.ADMIN_EMAIL && env.ADMIN_PASSWORD);
 
 export const getAdminConfig = () => ({
   email: env.ADMIN_EMAIL,
@@ -181,19 +151,10 @@ export const getAdminConfig = () => ({
 
 export const getCORSConfig = () => ({
   origin: function (origin: any, callback: any) {
-    if (!origin) {
-      return callback(null, true);
-    }
-    
+    if (!origin) return callback(null, true);
     const allowedOrigins = env.CORS_ORIGIN.split(',');
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    if (isDevelopment() && origin.includes('localhost')) {
-      return callback(null, true);
-    }
-    
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isDevelopment() && origin.includes('localhost')) return callback(null, true);
     return callback(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
@@ -204,10 +165,7 @@ export const getCORSConfig = () => ({
 export const getRateLimitConfig = () => ({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.RATE_LIMIT_MAX_REQUESTS,
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.',
-  },
+  message: { success: false, error: 'Too many requests from this IP, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });

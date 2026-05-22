@@ -1,34 +1,46 @@
 // backend/src/services/ai.service.ts - Updated Multi-Model Service
 import logger from '../config/logger';
-import groqService from './groq.service';
 import geminiService from './gemini.service';
+import openaiService from './openai.service';
 import claudeService from './claude.service';
 
-export type AIModel = 'groq' | 'gemini' | 'claude';
+export type AIModel = 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
 
 // Model configuration with credit multipliers
 export const MODEL_CONFIG = {
-  groq: {
-    name: 'Fast Generation',
-    description: 'Quick and efficient content generation with Llama 3.3 70B',
+  gemini: {
+    label: 'Fast',
+    description: 'Gemini 2.5 Flash – quick, efficient generation',
     creditMultiplier: 1,
-    service: groqService,
+    service: geminiService,
+    modelVariant: 'flash' as const,
     icon: '⚡',
     speed: 'fastest',
     quality: 'good'
   },
-  gemini: {
-    name: 'Balanced',
-    description: 'Good quality with moderate speed using Google Gemini Pro',
+  'gemini-pro': {
+    label: 'Balanced',
+    description: 'Gemini 2.5 Pro + Google Search Grounding – well-researched content',
     creditMultiplier: 2,
     service: geminiService,
-    icon: '⭐',
+    modelVariant: 'pro' as const,
+    enableGrounding: true,
+    icon: '🌟',
     speed: 'fast',
     quality: 'better'
   },
+  gpt4o: {
+    label: 'Premium',
+    description: 'GPT-4o – high quality, nuanced content',
+    creditMultiplier: 3,
+    service: openaiService,
+    icon: '🧠',
+    speed: 'moderate',
+    quality: 'excellent'
+  },
   claude: {
-    name: 'Premium Quality',
-    description: 'Highest quality and most detailed content with Claude Sonnet 4.5',
+    label: 'Elite',
+    description: 'Claude 3.5 Sonnet – deepest analysis and longest form',
     creditMultiplier: 5,
     service: claudeService,
     icon: '💎',
@@ -57,153 +69,125 @@ interface GenerationOptions {
   includeComparisons?: boolean;
   targetKeywordDensity?: number;
   includeInternalLinks?: boolean;
+  includeExternalLinks?: boolean;
   internalLinkSuggestions?: Array<{
-  url: string;
-  title: string;
-  description?: string;
-  relevanceScore?: number;
-}>;
+    url: string;
+    title: string;
+    description?: string;
+    relevanceScore?: number;
+  }>;
   maxInternalLinks?: number;
   internalLinkDensity?: number;
 }
 
 export class AIService {
   constructor() {
-    logger.info('AI Service initialized with multi-model support: Groq, Gemini, Claude');
+    logger.info('AI Service initialized with multi-model support: Gemini, GPT-4o, Claude');
   }
 
-  /**
-   * Generate blog post content using selected AI model
-   * @param keyword - Main keyword for the content
-   * @param model - AI model to use (groq, gemini, or claude)
-   * @param options - Content generation options
-   * @returns Generated content with title, body, and word count
-   */
   async generateBlogPost(
-    keyword: string, 
-    model: AIModel = 'groq',
+    keyword: string,
+    model: AIModel = 'gemini',
     options: GenerationOptions = {}
   ): Promise<any> {
-    // Validate model
-    if (!MODEL_CONFIG[model]) {
-      throw new Error(`Invalid model: ${model}. Available models: groq, gemini, claude`);
+    const config = MODEL_CONFIG[model];
+    if (!config) {
+      throw new Error(`Invalid model: ${model}. Available models: ${Object.keys(MODEL_CONFIG).join(', ')}`);
     }
 
-    const modelConfig = MODEL_CONFIG[model];
     const targetWordCount = options.wordCount || 1500;
-    const estimatedCredits = Math.ceil(targetWordCount * modelConfig.creditMultiplier);
+    const estimatedCredits = Math.ceil(targetWordCount * config.creditMultiplier);
 
     logger.info(
-      `Generating content with ${modelConfig.name} (${model}): ` +
-      `${targetWordCount} words, ~${estimatedCredits} credits (${modelConfig.creditMultiplier}x multiplier)`
+      `Generating content with ${config.label} (${model}): ` +
+      `${targetWordCount} words, ~${estimatedCredits} credits (${config.creditMultiplier}x multiplier)`
     );
 
     try {
       const startTime = Date.now();
-      
-      // Generate content using selected model
-      const content = await modelConfig.service.generateBlogPost(keyword, options);
-      
+
+      // Pass model-specific options
+      const serviceOptions = { ...options };
+     if (model === 'gemini' || model === 'gemini-pro') {
+        (serviceOptions as any).modelVariant = (config as any).modelVariant;
+        if (model === 'gemini-pro') {
+          (serviceOptions as any).enableGrounding = true;
+        }
+      }
+
+      const content = await config.service.generateBlogPost(keyword, serviceOptions);
+
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const actualCredits = Math.ceil(content.wordCount * modelConfig.creditMultiplier);
+      const actualCredits = Math.ceil(content.wordCount * config.creditMultiplier);
 
       logger.info(
-        `✅ SUCCESS: ${modelConfig.name} generated ${content.wordCount} words in ${duration}s ` +
+        `✅ SUCCESS: ${config.label} generated ${content.wordCount} words in ${duration}s ` +
         `(${actualCredits} credits used)`
       );
 
       return {
         ...content,
         model,
-        modelName: modelConfig.name,
+        modelName: config.label,
         creditsUsed: actualCredits,
         generationTime: parseFloat(duration)
       };
     } catch (error: any) {
-      logger.error(`❌ ${modelConfig.name} failed: ${error.message}`);
-      throw new Error(
-        `Content generation failed with ${modelConfig.name}: ${error.message}`
-      );
+      logger.error(`❌ ${config.label} failed: ${error.message}`);
+      throw new Error(`Content generation failed with ${config.label}: ${error.message}`);
     }
   }
 
-  /**
-   * Get available models with their configurations
-   * @returns List of available models with details
-   */
   getAvailableModels() {
     return Object.entries(MODEL_CONFIG).map(([key, config]) => ({
       id: key as AIModel,
-      name: config.name,
+      name: config.label,
       description: config.description,
       creditMultiplier: config.creditMultiplier,
       icon: config.icon,
       speed: config.speed,
       quality: config.quality,
-      costPerWord: `${config.creditMultiplier}x`,
-      recommended: key === 'groq' // Default recommendation
+      costPerWord: `${config.creditMultiplier}x`
     }));
   }
 
-  /**
-   * Calculate credits needed for a generation
-   * @param wordCount - Target word count
-   * @param model - AI model to use
-   * @returns Estimated credits needed
-   */
-  calculateCreditsNeeded(wordCount: number, model: AIModel = 'groq'): number {
+  calculateCreditsNeeded(wordCount: number, model: AIModel = 'gemini'): number {
     const multiplier = MODEL_CONFIG[model]?.creditMultiplier || 1;
     return Math.ceil(wordCount * multiplier);
   }
 
-  /**
-   * Get model recommendation based on user needs
-   * @param priority - User priority: 'speed', 'quality', or 'cost'
-   * @returns Recommended model
-   */
   getRecommendedModel(priority: 'speed' | 'quality' | 'cost'): AIModel {
     switch (priority) {
       case 'speed':
       case 'cost':
-        return 'groq';
+        return 'gemini';
       case 'quality':
         return 'claude';
       default:
-        return 'gemini';
+        return 'gemini-pro';
     }
   }
 
-  /**
-   * Check health status of all AI services
-   * @returns Status object for each service
-   */
   async checkService(): Promise<any> {
     const results = await Promise.allSettled([
-      groqService.checkService(),
       geminiService.checkService(),
+      openaiService.checkService(),
       claudeService.checkService()
     ]);
 
     return {
-      groq: results[0].status === 'fulfilled' 
-        ? { ...results[0].value, model: 'groq' }
-        : { status: 'error', error: results[0].reason?.message, model: 'groq' },
-      gemini: results[1].status === 'fulfilled' 
-        ? { ...results[1].value, model: 'gemini' }
-        : { status: 'error', error: results[1].reason?.message, model: 'gemini' },
-      claude: results[2].status === 'fulfilled' 
+      gemini: results[0].status === 'fulfilled'
+        ? { ...results[0].value, model: 'gemini' }
+        : { status: 'error', error: results[0].reason?.message, model: 'gemini' },
+      openai: results[1].status === 'fulfilled'
+        ? { ...results[1].value, model: 'gpt4o' }
+        : { status: 'error', error: results[1].reason?.message, model: 'gpt4o' },
+      claude: results[2].status === 'fulfilled'
         ? { ...results[2].value, model: 'claude' }
         : { status: 'error', error: results[2].reason?.message, model: 'claude' }
     };
   }
 
-  /**
-   * Validate if user has sufficient credits for generation
-   * @param userCredits - Available user credits
-   * @param wordCount - Target word count
-   * @param model - Selected model
-   * @returns Validation result
-   */
   validateCredits(userCredits: number, wordCount: number, model: AIModel): {
     valid: boolean;
     required: number;
@@ -217,9 +201,9 @@ export class AIService {
       valid,
       required,
       available: userCredits,
-      message: valid 
-        ? undefined 
-        : `Insufficient credits. Need ${required.toLocaleString()} credits but only have ${userCredits.toLocaleString()}`
+      message: valid
+        ? undefined
+        : `Insufficient credits. Need ${required.toLocaleString()} credits but have ${userCredits.toLocaleString()}`
     };
   }
 }

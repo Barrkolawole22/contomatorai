@@ -416,7 +416,7 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
     // Generation source for admin analytics
     generatedBy: {
       type: String,
-      enum: ['openai', 'gemini', 'groq', 'claude', 'manual', 'template'],
+      enum: ['openai', 'gemini', 'gemini-pro', 'gpt4o', 'claude', 'manual', 'template'],
       default: 'manual',
       index: true,
     },

@@ -14,7 +14,7 @@ export class ContentService {
       const user = await User.findById(userId);
       if (!user) throw new Error('User not found');
 
-      const selectedModel: AIModel = (p.model as AIModel) || 'groq';
+      const selectedModel: AIModel = (p.model as AIModel) || 'gemini';
       if (!MODEL_CONFIG[selectedModel]) {
         throw new Error(`Invalid model: ${selectedModel}. Available: groq, gemini, claude`);
       }
@@ -32,7 +32,7 @@ export class ContentService {
       if (!creditValidation.valid) {
         throw new Error(
           `Insufficient credits. You need ${estimatedCredits.toLocaleString()} credits ` +
-          `for ${targetWordCount.toLocaleString()} words with ${modelConfig.name} ` +
+          `for ${targetWordCount.toLocaleString()} words with ${modelConfig.label} ` +
           `(${modelConfig.creditMultiplier}x multiplier) but only have ` +
           `${((user as any).wordCredits || (user as any).credits || 0).toLocaleString()} credits available.`
         );
@@ -139,7 +139,7 @@ export class ContentService {
         contentId: content._id.toString(),
         creditsUsed: actualCreditsUsed,
         model: selectedModel,
-        modelName: modelConfig.name,
+        modelName: modelConfig.label,
         generationTime: generatedContent.generationTime
       };
     } catch (error: any) {
@@ -248,7 +248,7 @@ export class ContentService {
   }
 
   getAvailableModels() { return aiService.getAvailableModels(); }
-  calculateCreditsNeeded(wordCount: number, model: AIModel = 'groq') { return aiService.calculateCreditsNeeded(wordCount, model); }
+  calculateCreditsNeeded(wordCount: number, model: AIModel = 'gemini') { return aiService.calculateCreditsNeeded(wordCount, model); }
   getRecommendedModel(priority: 'speed' | 'quality' | 'cost') { return aiService.getRecommendedModel(priority); }
 }
 

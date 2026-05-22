@@ -1,4 +1,3 @@
-// backend/src/services/bulk-scheduler.service.ts
 import Content from '../models/content.model';
 import User from '../models/user.model';
 import Site from '../models/site.model';
@@ -11,13 +10,13 @@ import logger from '../config/logger';
 
 interface BulkGenerationEntry {
   keyword: string;
-  topic?: string;            // Display topic; falls back to keyword if omitted
+  topic?: string;
   scheduledDate?: Date;
   customPrompt?: string;
   additionalContext?: string;
-  docIds?: string[];         // Knowledgebase document IDs for RAG retrieval
-  dos?: string;              // AI must-do instructions (from CSV)
-  donts?: string;            // AI must-avoid instructions (from CSV)
+  docIds?: string[];
+  dos?: string;
+  donts?: string;
 }
 
 interface BulkGenerationOptions {
@@ -70,10 +69,6 @@ interface BulkProgress {
 export class BulkSchedulerService {
   private progressMap: Map<string, BulkProgress> = new Map();
 
-  /**
-   * Generate and schedule multiple articles in one operation.
-   * Supports optional knowledgebase RAG via docIds and per-entry dos/donts.
-   */
   async bulkGenerateAndSchedule(
     userId: string,
     entries: BulkGenerationEntry[],
@@ -98,11 +93,8 @@ export class BulkSchedulerService {
       const site = await Site.findOne({ _id: options.siteId, owner: userId });
       if (!site) throw new Error('Site not found or unauthorized');
 
-      const selectedModel = options.model || 'groq';
-      const creditsPerArticle = aiService.calculateCreditsNeeded(
-        options.wordCount || 1500,
-        selectedModel
-      );
+      const selectedModel = (options.model || 'gemini') as AIModel;
+      const creditsPerArticle = aiService.calculateCreditsNeeded(options.wordCount || 1500, selectedModel);
       const totalCreditsNeeded = creditsPerArticle * entries.length;
 
       if ((user.wordCredits || 0) < totalCreditsNeeded) {
@@ -113,7 +105,6 @@ export class BulkSchedulerService {
 
       logger.info(`💳 Total credits needed: ${totalCreditsNeeded} (${creditsPerArticle} per article)`);
 
-      // Crawl sitemap once if internal links are enabled
       let internalLinkSuggestions: any[] = [];
       if (options.includeInternalLinks) {
         try {
@@ -145,7 +136,6 @@ export class BulkSchedulerService {
         logger.info(`📝 Processing ${i + 1}/${entries.length}: "${entry.topic || entry.keyword}"`);
 
         try {
-          // Internal link suggestions per entry
           if (options.includeInternalLinks) {
             try {
               const suggestions = await sitemapCrawlerService.findRelevantLinks(
@@ -160,7 +150,6 @@ export class BulkSchedulerService {
             }
           }
 
-          // ── Build generation options ──────────────────────────────────────
           const generationOptions: Record<string, any> = {
             tone: options.tone || 'professional',
             wordCount: options.wordCount || 1500,
@@ -184,45 +173,33 @@ export class BulkSchedulerService {
             internalLinkDensity: options.internalLinkDensity || 3,
           };
 
-          // ── RAG: retrieve context from knowledgebase docs ─────────────────
           if (entry.docIds && entry.docIds.length > 0) {
             try {
-              logger.info(`📚 Retrieving knowledgebase context for "${entry.keyword}" from ${entry.docIds.length} doc(s)`);
-              const ragContext = await knowledgebaseService.retrieveContext(
+              logger.info(`RAG: retrieving context for "${entry.keyword}" from ${entry.docIds.length} doc(s)`);
+              const knowledgeContext = await knowledgebaseService.retrieveContext(
                 userId,
                 entry.docIds,
                 entry.topic || entry.keyword
               );
-              if (ragContext) {
-                generationOptions.additionalContext =
-                  ragContext + '\n\n' + (entry.additionalContext || '');
-              }
+              logger.info(`RAG: ${knowledgeContext.length} chars retrieved for "${entry.keyword}"`);
+              const mergedContext = [knowledgeContext, entry.additionalContext].filter(Boolean).join('\n\n---\n\n');
+              generationOptions.additionalContext = mergedContext;
             } catch (ragError: any) {
               logger.warn(`RAG retrieval failed for "${entry.keyword}": ${ragError.message}. Continuing without knowledgebase context.`);
             }
           }
 
-          // ── Dos / donts from CSV ─────────────────────────────────────────
           if (entry.dos || entry.donts) {
             const instructionParts: string[] = [];
             if (entry.dos) instructionParts.push(`MUST DO: ${entry.dos}`);
             if (entry.donts) instructionParts.push(`MUST NOT: ${entry.donts}`);
             const instructions = instructionParts.join('\n');
-            generationOptions.extraInstructions =
-              instructions + '\n\n' + (generationOptions.extraInstructions || '');
+            generationOptions.extraInstructions = instructions + '\n\n' + (generationOptions.extraInstructions || '');
           }
 
-          // ── Generate ─────────────────────────────────────────────────────
-          // Use topic as the display keyword if provided, fall back to keyword
           const generationKeyword = entry.topic || entry.keyword;
+          const generatedContent = await aiService.generateBlogPost(generationKeyword, selectedModel, generationOptions);
 
-          const generatedContent = await aiService.generateBlogPost(
-            generationKeyword,
-            selectedModel,
-            generationOptions
-          );
-
-          // ── Persist content ───────────────────────────────────────────────
           const content = new Content({
             userId,
             siteId: options.siteId,
@@ -261,18 +238,11 @@ export class BulkSchedulerService {
 
           logger.info(`✅ Success: "${entry.keyword}" (${actualCreditsUsed} credits)`);
 
-          if (i < entries.length - 1) {
-            await this.delay(500);
-          }
+          if (i < entries.length - 1) await this.delay(500);
         } catch (error: any) {
           logger.error(`❌ Failed: "${entry.keyword}" - ${error.message}`);
-
           results.failed++;
-          results.results.push({
-            keyword: entry.keyword,
-            status: 'failed',
-            error: error.message,
-          });
+          results.results.push({ keyword: entry.keyword, status: 'failed', error: error.message });
         }
       }
 
@@ -286,33 +256,26 @@ export class BulkSchedulerService {
       results.remainingCredits = updatedUser?.wordCredits || 0;
 
       logger.info(`🏁 Bulk generation complete: ${results.successful}/${results.total} successful`);
-
       return results;
     } catch (error: any) {
       logger.error('Bulk generation failed:', error);
-
       const progress = this.progressMap.get(operationId);
       if (progress) progress.status = 'failed';
-
       throw error;
     }
   }
 
-  /** Get progress of a running bulk operation. */
   getProgress(operationId: string): BulkProgress | null {
     return this.progressMap.get(operationId) || null;
   }
 
-  /** Clear progress record after completion. */
   clearProgress(operationId: string): void {
     this.progressMap.delete(operationId);
   }
 
   private generateTags(keyword: string): string[] {
-    const words = keyword.split(' ').filter(word => word.length > 0);
-    const baseTags = [...words.slice(0, 3)];
-    baseTags.push('guide', 'tips');
-
+    const words = keyword.split(' ').filter(w => w.length > 0);
+    const baseTags = [...words.slice(0, 3), 'guide', 'tips'];
     return baseTags
       .slice(0, 5)
       .map(tag => tag.toLowerCase().trim())
@@ -321,24 +284,16 @@ export class BulkSchedulerService {
 
   private calculateSEOScore(content: string, keyword: string): number {
     if (!content || !keyword) return 0;
-
     const contentLower = content.toLowerCase();
     const keywordLower = keyword.toLowerCase();
-
     let score = 0;
-
     if (contentLower.includes(keywordLower)) score += 25;
-
     const wordCount = content.replace(/<[^>]*>/g, ' ').split(/\s+/).length;
     if (wordCount >= 300) score += 25;
-
-    const hasHeadings = /<h[1-6][^>]*>/i.test(content);
-    if (hasHeadings) score += 25;
-
-    const keywordOccurrences = (contentLower.match(new RegExp(keywordLower, 'g')) || []).length;
-    const keywordDensity = (keywordOccurrences / wordCount) * 100;
-    if (keywordDensity >= 0.5 && keywordDensity <= 3) score += 25;
-
+    if (/<h[1-6][^>]*>/i.test(content)) score += 25;
+    const occurrences = (contentLower.match(new RegExp(keywordLower, 'g')) || []).length;
+    const density = (occurrences / wordCount) * 100;
+    if (density >= 0.5 && density <= 3) score += 25;
     return Math.min(score, 100);
   }
 
@@ -346,22 +301,15 @@ export class BulkSchedulerService {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /** Simple bulk generation without scheduling (all drafts). */
   async bulkGenerate(
     userId: string,
     keywords: string[],
     options: Omit<BulkGenerationOptions, 'scheduledDate'>
   ): Promise<BulkGenerationResult> {
-    const entries = keywords.map(keyword => ({ keyword }));
-    return this.bulkGenerateAndSchedule(userId, entries, options);
+    return this.bulkGenerateAndSchedule(userId, keywords.map(k => ({ keyword: k })), options);
   }
 
-  /** Estimate total credits for a bulk operation. */
-  estimateBulkCredits(
-    entries: number,
-    wordCount: number = 1500,
-    model: AIModel = 'groq'
-  ): number {
+  estimateBulkCredits(entries: number, wordCount: number = 1500, model: AIModel = 'gemini'): number {
     return aiService.calculateCreditsNeeded(wordCount, model) * entries;
   }
 }
