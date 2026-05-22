@@ -170,7 +170,8 @@ class BillingController {
       const weeklyStats = user.getWordUsageStats('week');
       const dailyStats = user.getWordUsageStats('day');
 
-      const purchaseHistory = user.wordPackagePurchases
+      const purchasesArray = user.wordPackagePurchases || [];
+      const purchaseHistory = purchasesArray
         .filter(purchase => purchase.status === 'completed')
         .sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime())
         .slice(0, 10)
@@ -191,7 +192,7 @@ class BillingController {
           totalWordsUsed: user.totalWordsUsed,
           currentMonthUsage: user.currentMonthUsage,
           plan: user.subscription?.plan || 'free',
-          preferredCurrency: (user.preferences as any)?.currency || 'NGN',
+          preferredCurrency: (user as any).preferences?.currency || 'NGN',
           usageStats: {
             daily: dailyStats,
             weekly: weeklyStats,
@@ -280,7 +281,7 @@ class BillingController {
     }
   }
 
-  // PAYSTACK: Verify transaction
+  // PAYSTACK: Verify transaction (Bulletproof Version)
   async verifyTransaction(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -290,17 +291,38 @@ class BillingController {
       if (!reference) return res.status(400).json({ success: false, message: 'Transaction reference is required' });
 
       const paystackAPI = getPaystackAPI();
-      const response = await paystackAPI.get(`/transaction/verify/${reference}`);
+      
+      let response;
+      try {
+        response = await paystackAPI.get(`/transaction/verify/${reference}`);
+      } catch (apiError: any) {
+        logger.error('Paystack API Error:', apiError.response?.data || apiError.message);
+        return res.status(400).json({ 
+          success: false, 
+          message: apiError.response?.data?.message || 'Failed to connect to Paystack verification API' 
+        });
+      }
 
-      if (!response.data.status || response.data.data.status !== 'success') {
-        return res.status(400).json({ success: false, message: 'Payment verification failed or payment not successful' });
+      if (!response.data.status) {
+        return res.status(400).json({ success: false, message: response.data.message || 'Payment verification failed' });
       }
 
       const transactionData = response.data.data;
-      const metadata = transactionData.metadata;
+      
+      if (transactionData.status !== 'success') {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Payment was not completed. Status is: ${transactionData.status}` 
+        });
+      }
 
-      if (metadata.userId !== userId) {
-        return res.status(403).json({ success: false, message: 'Unauthorized transaction access' });
+      let metadata = transactionData.metadata;
+      if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (e) { /* ignore */ }
+      }
+
+      if (!metadata || metadata.userId !== userId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized transaction access (Metadata mismatch)' });
       }
 
       const user = await User.findById(userId);
@@ -310,11 +332,12 @@ class BillingController {
       }
 
       if (!user || !targetItem) {
-        return res.status(404).json({ success: false, message: 'User or package not found' });
+        return res.status(404).json({ success: false, message: 'User or purchased package not found in database' });
       }
 
-      const existingPurchase = user.wordPackagePurchases.find(
-        purchase => purchase.stripePaymentIntentId === reference
+      const purchasesArray = user.wordPackagePurchases || [];
+      const existingPurchase = purchasesArray.find(
+        (purchase: any) => purchase.stripePaymentIntentId === reference
       );
 
       if (existingPurchase) {
@@ -336,19 +359,32 @@ class BillingController {
         (user as any).subscription.plan = planName;
         (user as any).subscription.status = 'active';
         (user as any).subscription.currentPeriodStart = new Date();
-        (user as any).subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-        
-        logger.info(`User ${userId} upgraded to ${planName} plan`);
+        (user as any).subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); 
       }
 
-      await user.addWordCredits(itemWordCount, {
-        packageId: targetId,
-        packageName: targetItem.name,
-        amountPaid: transactionData.amount,
-        currency: transactionData.currency,
-        stripePaymentIntentId: reference,
-        status: 'completed'
-      });
+      if (typeof user.addWordCredits === 'function') {
+         await user.addWordCredits(itemWordCount, {
+           packageId: targetId,
+           packageName: targetItem.name,
+           amountPaid: transactionData.amount,
+           currency: transactionData.currency,
+           stripePaymentIntentId: reference,
+           status: 'completed'
+         });
+      } else {
+         user.wordCredits = (user.wordCredits || 0) + itemWordCount;
+         if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
+         user.wordPackagePurchases.push({
+           packageId: targetId,
+           packageName: targetItem.name,
+           wordsIncluded: itemWordCount,
+           amountPaid: transactionData.amount,
+           currency: transactionData.currency,
+           purchaseDate: new Date(),
+           stripePaymentIntentId: reference,
+           status: 'completed'
+         });
+      }
 
       await user.save();
       const updatedUser = await User.findById(userId);
@@ -368,7 +404,7 @@ class BillingController {
       });
     } catch (error: any) {
       logger.error('Error verifying transaction:', error);
-      return res.status(500).json({ success: false, message: 'Failed to verify payment' });
+      return res.status(500).json({ success: false, message: error.message || 'Failed to verify payment (Server Crash)' });
     }
   }
 
@@ -415,8 +451,13 @@ class BillingController {
 
   private async handleChargeSuccess(data: any) {
     try {
-      const userId = data.metadata?.userId;
-      const packageId = data.metadata?.packageId;
+      let metadata = data.metadata;
+      if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (e) { /* ignore */ }
+      }
+
+      const userId = metadata?.userId;
+      const packageId = metadata?.packageId;
       const reference = data.reference;
 
       if (!userId || !packageId) return;
@@ -429,8 +470,9 @@ class BillingController {
 
       if (!user || !targetItem) return;
 
-      const existingPurchase = user.wordPackagePurchases.find(
-        purchase => purchase.stripePaymentIntentId === reference
+      const purchasesArray = user.wordPackagePurchases || [];
+      const existingPurchase = purchasesArray.find(
+        (purchase: any) => purchase.stripePaymentIntentId === reference
       );
 
       if (existingPurchase) return;
@@ -447,14 +489,30 @@ class BillingController {
         (user as any).subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       }
 
-      await user.addWordCredits(itemWordCount, {
-        packageId: targetId,
-        packageName: targetItem.name,
-        amountPaid: data.amount,
-        currency: data.currency,
-        stripePaymentIntentId: reference,
-        status: 'completed'
-      });
+      if (typeof user.addWordCredits === 'function') {
+         await user.addWordCredits(itemWordCount, {
+           packageId: targetId,
+           packageName: targetItem.name,
+           amountPaid: data.amount,
+           currency: data.currency,
+           stripePaymentIntentId: reference,
+           status: 'completed'
+         });
+      } else {
+         user.wordCredits = (user.wordCredits || 0) + itemWordCount;
+         if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
+         user.wordPackagePurchases.push({
+           packageId: targetId,
+           packageName: targetItem.name,
+           wordsIncluded: itemWordCount,
+           amountPaid: data.amount,
+           currency: data.currency,
+           purchaseDate: new Date(),
+           stripePaymentIntentId: reference,
+           status: 'completed'
+         });
+         await user.save();
+      }
 
     } catch (error: any) {
       logger.error('Error handling charge success webhook:', error);
@@ -463,12 +521,17 @@ class BillingController {
 
   private async handleChargeFailed(data: any) {
     try {
-      const userId = data.metadata?.userId;
+      let metadata = data.metadata;
+      if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (e) { /* ignore */ }
+      }
+
+      const userId = metadata?.userId;
       const reference = data.reference;
       
       if (userId) {
         const user = await User.findById(userId);
-        if (user) {
+        if (user && user.wordPackagePurchases) {
           const purchase = user.wordPackagePurchases.find(
             p => p.stripePaymentIntentId === reference
           );
@@ -501,7 +564,8 @@ class BillingController {
       const stats = user.getWordUsageStats(validatedTimeframe);
       const usageByDate: { [key: string]: number } = {};
       
-      user.wordUsageHistory.forEach((entry: any) => {
+      const usageHistoryArray = user.wordUsageHistory || [];
+      usageHistoryArray.forEach((entry: any) => {
         if (entry.date >= stats.startDate) {
           const dateKey = entry.date.toISOString().split('T')[0];
           usageByDate[dateKey] = (usageByDate[dateKey] || 0) + entry.wordsUsed;
