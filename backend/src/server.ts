@@ -2,9 +2,8 @@ import mongoose from 'mongoose';
 import app from './app';
 import { env } from './config/env';
 import logger from './config/logger';
-
-// ✅ NEW: Import cron jobs for scheduler and sitemap crawler
 import { initializeCronJobs } from './jobs/cron-jobs';
+import { seedBillingData } from './scripts/seedBilling';
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err: Error) => {
@@ -28,8 +27,11 @@ const startServer = async () => {
   try {
     // Connect to database first
     await connectDB();
-    
-    // ✅ NEW: Initialize cron jobs after database connection
+
+    // Seed billing data after DB is ready
+    await seedBillingData();
+
+    // Initialize cron jobs after database connection
     try {
       initializeCronJobs();
       logger.info('✅ Cron jobs initialized successfully');
@@ -39,15 +41,15 @@ const startServer = async () => {
       logger.error('❌ Failed to initialize cron jobs:', cronError);
       // Don't exit - server can still run without cron jobs
     }
-    
+
     // Start the server
     const server = app.listen(env.PORT, () => {
       logger.info(`Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
     });
-    
-    // ✅ INCREASED TIMEOUTS FOR CONTENT GENERATION
-    server.timeout = 300000; // 5 minutes (was 2 minutes)
-    server.keepAliveTimeout = 300000; // 5 minutes
+
+    // Increased timeouts for content generation
+    server.timeout = 300000;        // 5 minutes
+    server.keepAliveTimeout = 300000;
     server.headersTimeout = 310000; // Slightly higher than keepAliveTimeout
 
     logger.info('Server timeouts configured: 5 minutes for long-running operations');
@@ -63,7 +65,7 @@ const startServer = async () => {
     // Graceful shutdown handlers
     const shutdown = async (signal: string) => {
       logger.info(`Received ${signal}, shutting down gracefully`);
-      
+
       server.close(async () => {
         try {
           await mongoose.disconnect();
