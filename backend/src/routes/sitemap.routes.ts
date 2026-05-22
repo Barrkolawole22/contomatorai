@@ -1,4 +1,4 @@
-// backend/src/routes/sitemap.routes.ts - WITH RE-ENRICHMENT ENDPOINT
+// backend/src/routes/sitemap.routes.ts
 import express, { Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
 import sitemapCrawlerService from '../services/sitemap-crawler.service';
@@ -11,7 +11,57 @@ const router = express.Router();
 // Apply authentication middleware to all routes
 router.use(authMiddleware);
 
-// ✅ POST /api/sitemap/:siteId/crawl - Crawl a specific site
+// ✅ NEW: GET /api/sitemap/crawl/stream - SSE endpoint for real-time crawl progress
+router.get('/crawl/stream', async (req: AuthenticatedRequest, res: Response) => {
+  // 1. Set headers for Server-Sent Events
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders(); // Establish the connection immediately
+
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: 'Unauthorized' })}\n\n`);
+      return res.end();
+    }
+
+    const siteId = req.query.siteId as string;
+    if (!siteId) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: 'Site ID is required' })}\n\n`);
+      return res.end();
+    }
+    
+    // Verify site belongs to user
+    const site = await Site.findOne({ _id: siteId, owner: userId });
+    if (!site) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: 'Site not found or unauthorized' })}\n\n`);
+      return res.end();
+    }
+    
+    logger.info(`Starting streaming sitemap crawl for site ${siteId} by user ${userId}`);
+
+    // 2. Define the progress callback to send chunks to the frontend
+    const onProgress = (urlsFound: number, currentUrl: string) => {
+      // The double newline \n\n is required by the SSE specification
+      res.write(`data: ${JSON.stringify({ type: 'progress', urlsFound, currentUrl })}\n\n`);
+    };
+
+    // 3. Call your service, passing the callback
+    const urlCount = await sitemapCrawlerService.crawlSite(siteId, onProgress);
+
+    // 4. Send the completion event and close the stream
+    res.write(`data: ${JSON.stringify({ type: 'complete', urlsFound: urlCount })}\n\n`);
+    res.end();
+    
+  } catch (error: any) {
+    logger.error('Sitemap streaming crawl error:', error);
+    res.write(`data: ${JSON.stringify({ type: 'error', message: error.message || 'Failed to crawl sitemap' })}\n\n`);
+    res.end();
+  }
+});
+
+// ✅ POST /api/sitemap/:siteId/crawl - Crawl a specific site (Legacy REST)
 router.post('/:siteId/crawl', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -49,7 +99,7 @@ router.post('/:siteId/crawl', async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
-// ✅ NEW: POST /api/sitemap/:siteId/enrich - Re-enrich metadata for existing URLs
+// ✅ POST /api/sitemap/:siteId/enrich - Re-enrich metadata for existing URLs
 router.post('/:siteId/enrich', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -59,7 +109,7 @@ router.post('/:siteId/enrich', async (req: AuthenticatedRequest, res: Response) 
     }
 
     const { siteId } = req.params;
-    const { force = false } = req.body; // Optional: force re-enrich all URLs
+    const { force = false } = req.body; 
     
     // Verify site belongs to user
     const site = await Site.findOne({ _id: siteId, owner: userId });
@@ -73,7 +123,6 @@ router.post('/:siteId/enrich', async (req: AuthenticatedRequest, res: Response) 
     
     logger.info(`Starting metadata enrichment for site ${siteId} by user ${userId}`);
     
-    // Call the enrichment service
     const enrichedCount = await sitemapCrawlerService.enrichUrlMetadata(siteId, force);
 
     res.json({
@@ -90,7 +139,7 @@ router.post('/:siteId/enrich', async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
-// ✅ NEW: POST /api/sitemap/add-url - Manually add URL to sitemap
+// ✅ POST /api/sitemap/add-url - Manually add URL to sitemap
 router.post('/add-url', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -149,11 +198,9 @@ router.get('/urls', async (req: AuthenticatedRequest, res: Response) => {
 
     const { siteId, status, search, page = 1, limit = 100 } = req.query;
 
-    // Build query
     const query: any = {};
     
     if (siteId) {
-      // Verify site belongs to user
       const site = await Site.findOne({ _id: siteId, owner: userId });
       if (!site) {
         res.status(403).json({
@@ -189,7 +236,6 @@ router.get('/urls', async (req: AuthenticatedRequest, res: Response) => {
       SitemapUrl.countDocuments(query)
     ]);
 
-    // Transform data to match frontend interface
     const transformedUrls = urls.map(url => ({
       id: url._id.toString(),
       siteId: url.siteId.toString(),
@@ -244,7 +290,6 @@ router.get('/urls/:urlId', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: urlDoc.siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -292,7 +337,6 @@ router.put('/urls/:urlId', async (req: AuthenticatedRequest, res: Response) => {
     const { urlId } = req.params;
     const { title, description, keywords, status } = req.body;
 
-    // Get URL and verify ownership
     const urlDoc = await SitemapUrl.findById(urlId);
     if (!urlDoc) {
       res.status(404).json({
@@ -302,7 +346,6 @@ router.put('/urls/:urlId', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: urlDoc.siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -350,7 +393,6 @@ router.delete('/urls/:urlId', async (req: AuthenticatedRequest, res: Response) =
 
     const { urlId } = req.params;
 
-    // Get URL and verify ownership
     const urlDoc = await SitemapUrl.findById(urlId);
     if (!urlDoc) {
       res.status(404).json({
@@ -360,7 +402,6 @@ router.delete('/urls/:urlId', async (req: AuthenticatedRequest, res: Response) =
       return;
     }
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: urlDoc.siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -404,7 +445,6 @@ router.post('/urls/bulk', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // Verify all URLs belong to user's sites
     const urlDocs = await SitemapUrl.find({ _id: { $in: urlIds } });
     const siteIds = [...new Set(urlDocs.map(u => u.siteId.toString()))];
     
@@ -479,7 +519,6 @@ router.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
     const { siteId } = req.query;
 
     if (siteId) {
-      // Verify site belongs to user
       const site = await Site.findOne({ _id: siteId, owner: userId });
       if (!site) {
         res.status(403).json({
@@ -495,7 +534,6 @@ router.get('/stats', async (req: AuthenticatedRequest, res: Response) => {
         data: stats
       });
     } else {
-      // Get overall stats across user's sites
       const userSites = await Site.find({ owner: userId }).select('_id');
       const siteIds = userSites.map(s => s._id);
 
@@ -536,7 +574,6 @@ router.get('/:siteId/status', async (req: AuthenticatedRequest, res: Response) =
 
     const { siteId } = req.params;
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -580,7 +617,6 @@ router.post('/find-links', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -624,7 +660,6 @@ router.get('/suggestions', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: siteId, owner: userId });
     if (!site) {
       res.status(403).json({
@@ -665,7 +700,6 @@ router.delete('/:siteId', async (req: AuthenticatedRequest, res: Response) => {
 
     const { siteId } = req.params;
 
-    // Verify site belongs to user
     const site = await Site.findOne({ _id: siteId, owner: userId });
     if (!site) {
       res.status(403).json({
