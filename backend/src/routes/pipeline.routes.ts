@@ -3,23 +3,107 @@ import express, { Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
 import PipelineConfig from '../models/pipelineConfig.model';
 import PipelineRun from '../models/pipelineRun.model';
+import Site from '../models/site.model';
 import autonomousPipeline from '../services/autonomous-pipeline.service';
 import { schedulePipelineCron, cancelPipelineCron } from '../jobs/cron-jobs';
 import logger from '../config/logger';
+import Parser from 'rss-parser';
 
 const router = express.Router();
 router.use(authMiddleware);
 
-// POST /api/pipelines — create config and schedule cron if active
+const rssParser = new Parser({ timeout: 8000 });
+
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
+  'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'this', 'that', 'these', 'those', 'it', 'its',
+  'how', 'what', 'why', 'when', 'where', 'who', 'which', 'new', 'top',
+  'best', 'your', 'our', 'their', 'all', 'more', 'most', 'than', 'about',
+]);
+
+function extractNicheFromTitles(titles: string[]): string[] {
+  const wordFreq: Record<string, number> = {};
+
+  for (const title of titles) {
+    const words = title.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+    for (const word of words) {
+      if (word.length > 3 && !STOP_WORDS.has(word)) {
+        wordFreq[word] = (wordFreq[word] || 0) + 1;
+      }
+    }
+  }
+
+  return Object.entries(wordFreq)
+    .filter(([, count]) => count >= 2)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([word]) => word);
+}
+
+// GET /api/pipelines/suggest-niche?siteId=xxx
+router.get('/suggest-niche', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { siteId } = req.query;
+
+    if (!siteId) {
+      res.status(400).json({ success: false, message: 'siteId is required' });
+      return;
+    }
+
+    const site = await Site.findOne({ _id: siteId, owner: userId });
+    if (!site) {
+      res.status(404).json({ success: false, message: 'Site not found' });
+      return;
+    }
+
+    const suggestions: string[] = [];
+
+    // 1. Use synced WordPress categories if available
+    if (site.categories && site.categories.length > 0) {
+      const catNames = site.categories
+        .map(c => c.name)
+        .filter(n => n.toLowerCase() !== 'uncategorized')
+        .slice(0, 5);
+      suggestions.push(...catNames);
+    }
+
+    // 2. Fall back to RSS feed if no categories
+    if (suggestions.length === 0) {
+      try {
+        const feedUrl = site.url.replace(/\/$/, '') + '/feed/';
+        const feed = await rssParser.parseURL(feedUrl);
+        const titles = (feed.items || []).slice(0, 15).map(i => i.title || '').filter(Boolean);
+        const keywords = extractNicheFromTitles(titles);
+        suggestions.push(...keywords);
+        logger.info(`RSS niche detection for ${site.url}: found ${keywords.length} keywords`);
+      } catch (rssErr: any) {
+        logger.warn(`RSS niche detection failed for ${site.url}: ${rssErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        suggestions,
+        source: site.categories?.length > 0 ? 'categories' : 'rss',
+        siteName: site.name,
+      }
+    });
+  } catch (error: any) {
+    logger.error('Suggest niche error:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/pipelines
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
     const config = await PipelineConfig.create({ ...req.body, userId });
-
-    if (config.isActive) {
-      schedulePipelineCron(config);
-    }
-
+    if (config.isActive) schedulePipelineCron(config);
     logger.info(`Pipeline created: ${config._id} (active: ${config.isActive})`);
     res.json({ success: true, data: config });
   } catch (error: any) {
@@ -27,7 +111,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// GET /api/pipelines — list all configs for the authenticated user
+// GET /api/pipelines
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const configs = await PipelineConfig.find({ userId: req.user!.id });
@@ -37,7 +121,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// PUT /api/pipelines/:id — update config and reschedule cron
+// PUT /api/pipelines/:id
 router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const config = await PipelineConfig.findOneAndUpdate(
@@ -45,15 +129,9 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
       req.body,
       { new: true }
     );
-
-    if (!config) return res.status(404).json({ success: false, message: 'Not found' });
-
-    // Always cancel the old job first, then reschedule only if active
+    if (!config) { res.status(404).json({ success: false, message: 'Not found' }); return; }
     cancelPipelineCron(req.params.id);
-    if (config.isActive) {
-      schedulePipelineCron(config);
-    }
-
+    if (config.isActive) schedulePipelineCron(config);
     logger.info(`Pipeline updated: ${config._id} (active: ${config.isActive})`);
     res.json({ success: true, data: config });
   } catch (error: any) {
@@ -61,7 +139,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// DELETE /api/pipelines/:id — cancel cron before deleting
+// DELETE /api/pipelines/:id
 router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
     cancelPipelineCron(req.params.id);
@@ -73,7 +151,7 @@ router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// POST /api/pipelines/:id/trigger — manual trigger (CHANGED FROM /run TO /trigger)
+// POST /api/pipelines/:id/trigger
 router.post('/:id/trigger', async (req: AuthenticatedRequest, res: Response) => {
   try {
     await autonomousPipeline.runPipeline(req.params.id);
@@ -83,7 +161,7 @@ router.post('/:id/trigger', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
-// GET /api/pipelines/:id/runs — run history
+// GET /api/pipelines/:id/runs
 router.get('/:id/runs', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const runs = await PipelineRun.find({ pipelineConfigId: req.params.id }).sort('-runAt');
