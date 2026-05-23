@@ -52,26 +52,12 @@ export class PromptBuilderService {
     // OPENING + SOURCE GROUNDING
     // ============================================================
 
-    prompt += `Write a comprehensive, engaging, high-quality article about "${keyword}" for ${audience}.\n\n`;
+    prompt += `Write an article about "${keyword}" for ${audience}.\n\n`;
 
     if (options.additionalContext) {
-      prompt += `CRITICAL SOURCE MATERIAL -- YOU MUST USE THIS:
+      prompt += `SOURCE MATERIAL:
 
-The following content comes from the source article and is your PRIMARY reference.
-
-YOU MUST:
-- Base the article primarily on this material
-- Incorporate relevant facts, examples, explanations, and insights from this source
-- Expand and explain the ideas naturally and clearly
-- Maintain factual consistency with the provided material
-
-YOU MUST NOT:
-- Ignore this material
-- Invent statistics, studies, cases, quotes, or factual claims not supported by the source
-- Contradict the source material
-- Fabricate examples pretending they came from the source
-
-If information is missing or uncertain, explain conservatively instead of inventing details.
+Use this as your primary reference. Stick to what it says -- do not invent facts, quotes, or statistics.
 
 ---
 ${options.additionalContext}
@@ -81,12 +67,17 @@ ${options.additionalContext}
     }
 
     // ============================================================
-    // TARGET LENGTH
+    // TARGET LENGTH + PADDING RULES
     // ============================================================
 
-    prompt += `TARGET LENGTH: Approximately ${targetWordCount} words
+    prompt += `TARGET LENGTH: Approximately ${targetWordCount} words.
 
-Aim close to the target naturally. A strong, complete article is more important than exact word count.
+WORD COUNT RULES -- VERY IMPORTANT:
+- Every sentence must earn its place. If it does not add new information, cut it.
+- Do NOT repeat the same idea in different words just to reach the word count.
+- Do NOT add filler sentences like "This is an important topic" or "As we can see..."
+- Do NOT restate what you just said at the end of each section.
+- If you run out of genuinely useful things to say before hitting the word count, end the article. A shorter, tighter article is always better than a padded one.
 
 `;
 
@@ -95,63 +86,47 @@ Aim close to the target naturally. A strong, complete article is more important 
     // ============================================================
 
     if (attempt > 1) {
-      prompt += `IMPORTANT RETRY INSTRUCTIONS:
-
-The previous generation attempt had quality issues. You MUST:
-- Write complete, fully developed sections
-- Avoid abrupt endings and placeholders
-- Ensure logical flow between sections
-- Finish with a satisfying conclusion
+      prompt += `RETRY NOTE: Previous attempt had quality issues. Write complete sections, avoid placeholders, finish with a proper conclusion.
 
 `;
     }
 
     // ============================================================
-    // WRITING STYLE
+    // WRITING STYLE -- PLAIN EVERYDAY LANGUAGE
     // ============================================================
 
     prompt += `WRITING STYLE:
 
-Think like an expert writer for ${this.getStyleReference(style)}.
+Write the way a smart person explains something to a friend -- clear, direct, no jargon unless necessary.
 
-Your goal is to inform clearly, engage naturally, provide practical value, and sound human and thoughtful.
+Rules:
+- Use short sentences. Break up long ones.
+- Use everyday words. Say "use" not "utilize". Say "help" not "facilitate".
+- If you need to explain a technical term, do it in one plain sentence immediately after.
+- No corporate speak. No academic padding. No motivational filler.
+- Vary your sentence length -- mix short punchy sentences with longer explanatory ones.
 
 Tone: ${tone}
-
-Audience level: ${this.getAudienceDescription(audience)}
+Audience: ${this.getAudienceDescription(audience)}
 
 `;
 
     // ============================================================
-    // HEADLINE RULES -- THE MOST IMPORTANT SECTION FOR TITLE QUALITY
+    // HEADLINE RULES
     // ============================================================
 
-    prompt += `HEADLINE (H1 TITLE) RULES -- READ CAREFULLY:
+    prompt += `HEADLINE (H1 TITLE) RULES:
 
-The title must be plain, direct, and journalistic. Think newspaper headline, not blog post SEO title.
-
-RULES:
 - Use the source headline as your starting point
-- Keep it short -- ideally under 10 words, maximum 12
-- NO colons, NO semicolons, NO em-dashes splitting two clauses
-- NO subtitle after the main title
-- NO buzzwords: avoid "navigating", "unyielding", "comprehensive", "ultimate", "in-depth", "exploring", "delving", "crucial", "vital", "game-changing", "transformative", "landscape", "realm", "journey", "unveiling", "empowering"
-- NO AI-sounding phrases: avoid "In today's world", "In an era of", "It is worth noting"
-- Write it like a journalist, not a content marketer
+- Keep it under 12 words
+- No colons, no semicolons, no em-dashes splitting two clauses
+- No buzzwords: avoid "navigating", "comprehensive", "ultimate", "exploring", "delving", "transformative", "landscape", "realm", "journey", "unveiling"
+- Write it like a newspaper headline, not a blog post title
 
-GOOD examples (plain, direct, under 12 words):
-- "BOSCON and Nigerian Law Society Award Blue Silk Despite Legal Dispute"
-- "Tinubu Does Not Plan to Rename Nigeria or Abolish Sharia Law"
-- "Nigeria Faces Mounting Pressure Over New Electoral Guidelines"
-- "Court Rules Against Meta in User Data Privacy Case"
-
-BAD examples (do NOT write titles like these):
-- "Navigating the Misinformation Maze: The Truth About Tinubu's Alleged Plans" (colon + too long + buzzword)
-- "The Unyielding Path of Professional Recognition: BOSCON's Blue Silk Amidst Legal Turmoil" (colon + flowery + vague)
-- "Understanding the Complex Landscape of Nigerian Legal Recognition in 2026" (vague + buzzwords)
-- "Exploring How Nigeria's Legal System Handles Professional Disputes" (starts with "Exploring")
-
-If the source has a clear, plain headline already -- use it directly or simplify it slightly.
+GOOD: "Tinubu Does Not Plan to Rename Nigeria or Abolish Sharia Law"
+GOOD: "Court Rules Against Meta in User Data Privacy Case"
+BAD: "Navigating the Misinformation Maze: The Truth About Tinubu's Plans" (colon + buzzword)
+BAD: "Understanding the Complex Landscape of Nigerian Legal Recognition" (vague + buzzwords)
 
 `;
 
@@ -161,36 +136,19 @@ If the source has a clear, plain headline already -- use it directly or simplify
 
     prompt += `CONTENT STRUCTURE:
 
-1. HEADLINE
-Follow the headline rules above strictly.
+Start with <h1> (the headline). Then go straight into the article -- no repeated title, no subtitle.
 
----
+OPENING (first 2-3 paragraphs):
+- Start with the most important or interesting fact from the source
+- Tell readers what happened and why it matters
+- Do NOT start with "In today's world", "It is important to note", or any similar filler
 
-2. STRONG OPENING (150-250 words)
-
-Hook readers immediately using one of:
-- A surprising insight
-- A relatable challenge
-- A bold statement
-- A compelling scenario
-
-Then establish why the topic matters and what readers will gain.
-
----
-
-3. MAIN BODY
-
-Organize around 4-6 meaningful sections. Each section should:
-- Start with a clear core idea
-- Explain why it matters
-- Include concrete details and examples
-- Connect naturally to the next section
-
-Section guidelines:
-- Use descriptive H2 headings (apply the same plain-language rules as the H1)
-- Develop sections thoroughly (250-400 words each)
-- Keep paragraphs readable
-- Vary sentence structure naturally
+MAIN BODY:
+- 4-6 sections with H2 headings
+- Each section covers ONE idea -- do not mix topics
+- H2 headings should be plain and descriptive, same rules as H1
+- Each paragraph makes exactly one point, then moves on
+- No summary sentences at the end of each section (that's padding)
 
 `;
 
@@ -203,66 +161,61 @@ Section guidelines:
       options.internalLinkSuggestions &&
       options.internalLinkSuggestions.length > 0
     ) {
-      const maxLinks = options.maxInternalLinks || 5;
+      const maxLinks = options.maxInternalLinks || 3;
 
-      prompt += `INTERNAL LINKING REQUIREMENTS:
+      prompt += `INTERNAL LINKS:
 
-Include up to ${maxLinks} internal links naturally throughout the article.
+Add up to ${maxLinks} internal links where they genuinely help the reader learn more.
 
-AVAILABLE INTERNAL LINKS:
-
-${options.internalLinkSuggestions.map((link, index) =>
-  `${index + 1}. "${link.title}" (${link.url})${link.description ? `\n   Context: ${link.description}` : ''}`
+AVAILABLE LINKS:
+${options.internalLinkSuggestions.map((link, i) =>
+  `${i + 1}. "${link.title}" -- ${link.url}`
 ).join('\n')}
 
-BEST PRACTICES:
-- Link naturally where readers would genuinely benefit
-- Use descriptive anchor text, not "click here"
-- Spread links across multiple sections
-
-HTML FORMAT: <a href="URL">descriptive anchor text</a>
+Format: <a href="URL">descriptive anchor text</a>
+Do not force links in -- only add them where they fit naturally.
 
 `;
     }
 
     // ============================================================
-    // OPTIONAL CONTENT FEATURES
+    // EXTERNAL LINKS -- ALWAYS ON FOR PIPELINE ARTICLES
+    // ============================================================
+
+    prompt += `EXTERNAL LINKS:
+
+Add 2-3 external links to authoritative sources where relevant.
+
+Good sources: Wikipedia, government sites (.gov), official organization websites, major news publications.
+
+Format: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
+
+Rules:
+- Only link to URLs you are highly confident actually exist
+- Do NOT invent URLs or guess at web addresses
+- If unsure, skip the link rather than fabricating one
+- Use the link naturally in a sentence -- do not add a "References" section at the end
+
+`;
+
+    // ============================================================
+    // OPTIONAL FEATURES
     // ============================================================
 
     if (options.includeStatistics) {
-      prompt += `STATISTICS:
-- Include relevant statistics ONLY if supported by the source material
-- Never fabricate numbers or studies
+      prompt += `STATISTICS: Include relevant statistics only if the source material supports them. Never invent numbers.
 
 `;
     }
 
     if (options.includeExamples) {
-      prompt += `EXAMPLES:
-- Include detailed examples or case studies where appropriate
-- Prefer examples grounded in the source material
+      prompt += `EXAMPLES: Include real examples grounded in the source material where they help explain a point.
 
 `;
     }
-
-    if (options.includeComparisons) {
-      prompt += `COMPARISONS:
-- Compare approaches, tools, methods, or ideas where relevant
-- Explain practical pros and cons
-
-`;
-    }
-
-    // ============================================================
-    // FAQ SECTION
-    // ============================================================
 
     if (options.includeFAQ) {
-      prompt += `4. FREQUENTLY ASKED QUESTIONS
-
-Include 5-7 practical questions readers commonly ask about "${keyword}".
-
-FAQ answers should be direct, concise, and grounded in the source material.
+      prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would ask, with direct plain-language answers.
 
 `;
     }
@@ -271,50 +224,17 @@ FAQ answers should be direct, concise, and grounded in the source material.
     // CONCLUSION
     // ============================================================
 
-    prompt += `${options.includeFAQ ? '5' : '4'}. STRONG CONCLUSION (150-200 words)
-
-The conclusion should:
-- Summarize the key takeaways
-- Reinforce the article's core message
-- End naturally and confidently
+    prompt += `CONCLUSION:
+- 2-3 paragraphs maximum
+- Summarize only what has not already been said
+- End with a clear takeaway or implication -- not a motivational statement
+- Do NOT say "In conclusion" or "To summarize"
 
 `;
 
     if (options.callToAction) {
-      prompt += `Include this call-to-action naturally: ${options.callToAction}
-
-`;
+      prompt += `Include this call-to-action naturally: ${options.callToAction}\n\n`;
     }
-
-    // ============================================================
-    // QUALITY STANDARDS
-    // ============================================================
-
-    prompt += `QUALITY STANDARDS:
-
-Write like a knowledgeable human expert speaking clearly to an intelligent reader.
-
-PRIORITIZE: Specificity, clarity, natural flow, useful insights, concrete examples.
-
-AVOID:
-- Generic filler and repetitive phrasing
-- Buzzword-heavy writing
-- AI-sounding introductions ("In today's fast-paced world...")
-- Keyword stuffing
-- Fabricated claims, fake studies, or invented citations
-- Empty motivational language
-
-`;
-
-    // ============================================================
-    // SEO GUIDANCE
-    // ============================================================
-
-    prompt += `SEO INTEGRATION:
-
-${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)}
-
-`;
 
     // ============================================================
     // HTML FORMATTING
@@ -322,134 +242,123 @@ ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)
 
     prompt += `HTML FORMATTING:
 
-Use clean semantic HTML:
-- <h1> for the main title (one only)
-- <h2> for major sections
-- <h3> for subsections
+- <h1> for the main title (ONE only -- do not repeat the title anywhere else in the article)
+- <h2> for sections
+- <h3> for subsections if needed
 - <p> for paragraphs
 - <ul>/<ol>/<li> for lists
 - <a href="URL">text</a> for links
+- No markdown
 
-Do NOT include markdown.
+`;
+
+    // ============================================================
+    // AVOID LIST
+    // ============================================================
+
+    prompt += `NEVER DO THESE:
+- Repeat the title as the first line after the H1
+- Start the article body with the headline again in any form
+- Use "In today's fast-paced world" or any similar opener
+- Write "It is worth noting that..." or "It is important to understand..."
+- End sections with a sentence that just restates what the section said
+- Invent quotes, statistics, studies, or URLs
+- Use the word "delve", "realm", "landscape", "crucial", "vital", "game-changing"
+- Pad sentences to reach word count
 
 `;
 
     // ============================================================
-    // EXTERNAL LINKS
+    // SEO
     // ============================================================
 
-    if (options.includeExternalLinks) {
-      prompt += `EXTERNAL LINKING:
-
-Where genuinely relevant, include 2-3 authoritative external references (Wikipedia, .gov, .edu, major publications).
-
-FORMAT: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
-
-IMPORTANT: Only include URLs you are highly confident are real. Do NOT invent URLs.
+    prompt += `SEO: ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)}
 
 `;
-    }
 
     // ============================================================
-    // CUSTOM REQUIREMENTS
+    // CUSTOM
     // ============================================================
 
     if (options.customPrompt) {
-      prompt += `ADDITIONAL REQUIREMENTS:\n\n${options.customPrompt}\n\n`;
+      prompt += `ADDITIONAL REQUIREMENTS:\n${options.customPrompt}\n\n`;
     }
 
     if (options.extraInstructions) {
-      prompt += `EXTRA GUIDELINES:\n\n${options.extraInstructions}\n\n`;
+      prompt += `EXTRA GUIDELINES:\n${options.extraInstructions}\n\n`;
     }
 
     // ============================================================
-    // FINAL REMINDER
+    // FINAL
     // ============================================================
 
-    prompt += `FINAL REMINDER:
-
-- Follow the headline rules strictly -- short, plain, no colons, no buzzwords
-- Use the provided source material throughout
-- Ground factual claims in the supplied context
-- Do not invent unsupported claims, statistics, or citations
-
-Now write the complete article. Start with <h1> and finish with a complete conclusion.
+    prompt += `Now write the article. Start with <h1>. Go straight into the content after the title -- no repeated headline, no subtitle.
 `;
 
     return prompt;
   }
 
   buildSystemMessage(): string {
-    return `You are an expert content writer known for producing clear, direct, human-sounding articles.
+    return `You are a journalist and editor who writes clear, direct articles for general readers.
 
-YOUR CORE PRINCIPLES:
+YOUR RULES:
 
-1. PLAIN HEADLINES
-Write titles like a newspaper editor, not a content marketer.
-Short. Direct. No colons splitting two clauses. No buzzwords.
-If the source has a usable headline, adapt it directly.
+1. PLAIN LANGUAGE
+Write the way a smart person explains something to a friend.
+Short sentences. Everyday words. No jargon without explanation.
+Say "use" not "utilize". Say "help" not "facilitate". Say "now" not "at this juncture".
 
-2. SOURCE MATERIAL IS AUTHORITATIVE
-When source material is provided, treat it as the primary factual reference.
-Base the article on it. Do not fabricate claims, statistics, or citations.
+2. NO PADDING
+Every sentence must add new information.
+Do not restate what you just said. Do not summarize at the end of each section.
+If you have nothing new to say, stop writing.
 
-3. CLARITY OVER COMPLEXITY
-Write clearly and directly. Avoid unnecessary jargon.
+3. PLAIN HEADLINES
+One H1. Short. No colon splitting it into two parts. No buzzwords.
+Same rules for H2 headings inside the article.
+Never repeat the H1 title anywhere in the article body.
 
-4. SPECIFICITY OVER VAGUENESS
-Use concrete details and meaningful examples.
+4. SOURCE FIRST
+When source material is provided, use it as the primary reference.
+Do not invent facts, quotes, statistics, or citations.
+If something is uncertain, say so simply rather than fabricating details.
 
-5. VALUE OVER FLUFF
-Every paragraph should contribute useful information.
+5. EXTERNAL LINKS
+Always include 2-3 links to real, authoritative external sources.
+Only use URLs you are confident actually exist. Never invent a URL.
 
-6. NATURAL HUMAN FLOW
-Vary sentence structure. Use smooth transitions. Avoid robotic repetition.
-
-FORMATTING RULES:
-- Use semantic HTML: <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <a>
-- One <h1> only -- the main title
-- Keep formatting clean and valid
+FORMATTING:
+- Semantic HTML only: h1, h2, h3, p, ul, ol, li, a
+- One h1 only
 - No markdown
+- No repeated title after the h1
 
-AVOID THESE AI WRITING PATTERNS AT ALL TIMES:
-- "In today's fast-paced world..."
-- "It is worth noting that..."
-- "In an era of..."
-- "Navigating the [noun] landscape"
-- "Exploring the [adjective] realm of"
-- "The unyielding/transformative/comprehensive journey"
-- Colons splitting headline into title + subtitle
-- Generic filler openings
-- Fabricated statistics or studies
-- Keyword stuffing
-- Empty conclusions
-
-Write like a credible human journalist or subject-matter expert.`;
+NEVER USE THESE WORDS OR PHRASES:
+delve, realm, landscape, crucial, vital, game-changing, transformative, unveiling,
+navigating, empowering, comprehensive guide, in-depth look, it is worth noting,
+in today's fast-paced world, in an era of, as we can see, to summarize,
+in conclusion, this is important because`;
   }
 
-  private buildSEOGuidance(
-    keyword: string,
-    focus?: string,
-    density?: number
-  ): string {
-    let guidance = `Mention "${keyword}" naturally where relevant. `;
+  private buildSEOGuidance(keyword: string, focus?: string, density?: number): string {
+    let guidance = `Mention "${keyword}" naturally where it fits. `;
 
     switch (focus) {
       case 'primary_keyword':
-        guidance += `Use the exact phrase naturally throughout while maintaining readability.`;
+        guidance += `Use the exact phrase naturally throughout.`;
         break;
       case 'semantic_keywords':
-        guidance += `Focus on semantic relevance and related concepts.`;
+        guidance += `Focus on related concepts and semantic variations.`;
         break;
       case 'long_tail':
-        guidance += `Target long-tail keyword variations naturally within headings and content.`;
+        guidance += `Include natural long-tail variations in headings and body.`;
         break;
       default:
-        guidance += `Balance the primary keyword with natural language and semantic variations.`;
+        guidance += `Balance the keyword with natural language.`;
     }
 
     if (density && density > 0) {
-      guidance += `\n\nTarget keyword density: approximately ${density}% -- but natural writing quality takes priority.`;
+      guidance += ` Target ~${density}% density but prioritize readability.`;
     }
 
     return guidance;
@@ -457,10 +366,10 @@ Write like a credible human journalist or subject-matter expert.`;
 
   private getStyleReference(style: string): string {
     const references: Record<string, string> = {
-      conversational: 'a thoughtful Medium or Atlantic writer',
-      academic: 'an accessible but authoritative academic researcher',
-      journalistic: 'a professional investigative journalist',
-      technical: 'a precise technical educator or engineer',
+      conversational: 'a thoughtful writer for The Atlantic or Medium',
+      academic: 'an accessible academic researcher',
+      journalistic: 'a professional news journalist',
+      technical: 'a precise technical educator',
       creative: 'a narrative feature writer',
     };
     return references[style] || references.conversational;
@@ -468,12 +377,12 @@ Write like a credible human journalist or subject-matter expert.`;
 
   private getAudienceDescription(audience: string): string {
     if (audience.toLowerCase().includes('beginner')) {
-      return 'Explain concepts clearly without assuming prior knowledge.';
+      return 'Explain everything clearly -- assume no prior knowledge.';
     }
     if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) {
-      return 'Assume familiarity with fundamentals and focus on deeper insights.';
+      return 'Skip the basics -- focus on depth and nuance.';
     }
-    return 'Balance accessibility with meaningful depth.';
+    return 'Assume intelligence but not expertise -- explain ideas without being condescending.';
   }
 
   validateInternalLinks(
@@ -501,9 +410,7 @@ Write like a credible human journalist or subject-matter expert.`;
     const valid = foundLinks >= minRequired;
 
     if (!valid) {
-      issues.push(
-        `Only ${foundLinks} of ${requiredLinks.length} internal links included (minimum: ${minRequired})`
-      );
+      issues.push(`Only ${foundLinks} of ${requiredLinks.length} internal links included (minimum: ${minRequired})`);
     }
 
     const anchorTags = content.match(/<a\s+href="[^"]+">.*?<\/a>/gi) || [];
@@ -511,9 +418,7 @@ Write like a credible human journalist or subject-matter expert.`;
       issues.push('Some URLs were found but not properly formatted as anchor tags');
     }
 
-    logger.info(
-      `Internal link validation: ${foundLinks}/${requiredLinks.length} links found, valid: ${valid}`
-    );
+    logger.info(`Internal link validation: ${foundLinks}/${requiredLinks.length} links found, valid: ${valid}`);
 
     return { valid, foundLinks, missingLinks, issues };
   }

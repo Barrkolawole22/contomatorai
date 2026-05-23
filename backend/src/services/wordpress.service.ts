@@ -193,6 +193,7 @@ class SimplifiedWordPressService {
       categories?: string[];
       tags?: string[];
       featuredImage?: string;
+      featuredImageId?: number;
     } = {}
   ): Promise<PublishResponse> {
     try {
@@ -211,6 +212,10 @@ class SimplifiedWordPressService {
           ai_generated: content.aiGenerated || true
         }
       };
+
+      if (options.featuredImageId) {
+        postData['featured_media'] = options.featuredImageId;
+      }
 
       // FIX: Handle categories with type guard
       if (options.categories && options.categories.length > 0) {
@@ -551,6 +556,62 @@ class SimplifiedWordPressService {
       throw new Error(`Failed to fetch tags from WordPress: ${error.message}`);
     }
   }
+  async uploadImageFromUrl(
+  site: ISite,
+  imageUrl: string,
+  altText: string = ''
+): Promise<number | undefined> {
+  try {
+    const imageResponse = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; ContentAI/1.0)',
+      },
+    });
+
+    const contentType = imageResponse.headers['content-type'] || 'image/jpeg';
+    const buffer = Buffer.from(imageResponse.data);
+
+    const urlPath = new URL(imageUrl).pathname;
+    const filename = urlPath.split('/').pop() || 'image.jpg';
+
+    const authString = Buffer.from(`${site.username}:${site.applicationPassword}`).toString('base64');
+
+    const uploadResponse = await axios.post(
+      `${site.apiUrl}/media`,
+      buffer,
+      {
+        headers: {
+          'Authorization': `Basic ${authString}`,
+          'Content-Type': contentType,
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+        timeout: 30000,
+      }
+    );
+
+    if (altText && uploadResponse.data.id) {
+      await axios.post(
+        `${site.apiUrl}/media/${uploadResponse.data.id}`,
+        { alt_text: altText },
+        {
+          headers: {
+            'Authorization': `Basic ${authString}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 5000,
+        }
+      ).catch(() => {});
+    }
+
+    logger.info(`Uploaded image to WordPress media library: ID ${uploadResponse.data.id}`);
+    return uploadResponse.data.id;
+  } catch (err: any) {
+    logger.warn(`Image upload failed for ${imageUrl}: ${err.message} -- publishing without featured image`);
+    return undefined;
+  }
+}
 }
 
 export default new SimplifiedWordPressService();

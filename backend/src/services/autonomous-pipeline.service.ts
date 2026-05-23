@@ -4,6 +4,7 @@ import PipelineConfig from '../models/pipelineConfig.model';
 import PipelineRun from '../models/pipelineRun.model';
 import rssService from './rss.service';
 import scraperService from './scraper.service';
+import { ScrapedImage } from './scraper.service';
 import aiService from './ai.service';
 import Site from '../models/site.model';
 import Content from '../models/content.model';
@@ -36,8 +37,6 @@ export class AutonomousPipelineService {
     });
     await pipelineRun.save();
 
-    // Extract the plain ObjectId from the populated siteId — critical for
-    // correct query matching on the schedule page
     const siteObjectId = (config.siteId as any)?._id ?? config.siteId;
     const siteIdString = siteObjectId?.toString();
 
@@ -64,20 +63,19 @@ export class AutonomousPipelineService {
 
       for (const item of rssItems) {
         try {
-          // Build context seed — always include title so Gemini has something
-          // meaningful even when scraping fails entirely
           let contextSeed = [item.title, item.description].filter(Boolean).join('\n\n');
+          let scrapedImages: ScrapedImage[] = [];
 
           try {
             const scraped = await scraperService.extract(item.link);
+            scrapedImages = scraped.images || [];
+
             if (scraped.wordCount >= MIN_CONTEXT_WORDS) {
               contextSeed = scraped.text;
-              logger.info(`Scraped ${scraped.wordCount} words from ${item.link}`);
+              logger.info(`Scraped ${scraped.wordCount} words and ${scrapedImages.length} images from ${item.link}`);
             } else {
               contextSeed = [item.title, item.description, scraped.text].filter(Boolean).join('\n\n');
-              logger.warn(
-                `Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`
-              );
+              logger.warn(`Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`);
             }
           } catch (scrapeErr: any) {
             logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS seed`);
@@ -116,6 +114,7 @@ export class AutonomousPipelineService {
               internalLinkSuggestions: trimmedLinks,
               includeInternalLinks: trimmedLinks.length > 0,
               maxInternalLinks: trimmedLinks.length,
+              includeExternalLinks: true, // always on for pipeline articles
             });
           } catch (genErr: any) {
             if (this.isQuotaError(genErr) && !proQuotaExhausted) {
@@ -128,6 +127,7 @@ export class AutonomousPipelineService {
                 internalLinkSuggestions: trimmedLinks,
                 includeInternalLinks: trimmedLinks.length > 0,
                 maxInternalLinks: trimmedLinks.length,
+                includeExternalLinks: true,
               });
             } else {
               throw genErr;
@@ -139,9 +139,6 @@ export class AutonomousPipelineService {
             articleResult.content
           );
 
-          // Determine schedule date BEFORE the save so status + scheduledPublishDate
-          // are written in a single atomic operation — same pattern as bulkScheduler.
-          // previewWindowMinutes === 0 means publish immediately; anything else = schedule.
           const staggeredMinutes = config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
           const scheduledDate =
             config.previewWindowMinutes > 0
@@ -150,12 +147,12 @@ export class AutonomousPipelineService {
 
           const content = new Content({
             userId: config.userId,
-            siteId: siteObjectId,                             // plain ObjectId, not populated doc
+            siteId: siteObjectId,
             title: articleResult.title,
             content: articleResult.content,
             excerpt: metaDescription,
             keyword: item.title,
-            status: scheduledDate ? 'scheduled' : 'draft',   // single authoritative write
+            status: scheduledDate ? 'scheduled' : 'draft',
             scheduledPublishDate: scheduledDate,
             timezone: 'UTC',
             wordCount: articleResult.wordCount,
@@ -172,11 +169,25 @@ export class AutonomousPipelineService {
               `Content ${content._id} scheduled -- publishes at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`
             );
           } else {
-            // previewWindowMinutes === 0: publish immediately to WordPress
+            // Publish immediately
             const fullSite = await Site.findById(siteObjectId).select('+applicationPassword');
             if (fullSite) {
+              // Upload scraped images to WordPress media library
+              let featuredImageId: number | undefined;
+              if (scrapedImages.length > 0) {
+                featuredImageId = await wordpressService.uploadImageFromUrl(
+                  fullSite,
+                  scrapedImages[0].url,
+                  scrapedImages[0].alt || articleResult.title
+                );
+                if (featuredImageId) {
+                  logger.info(`Uploaded featured image (ID: ${featuredImageId}) for "${item.title}"`);
+                }
+              }
+
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
+                featuredImageId,
               });
               if (publishResult.success) {
                 content.status = 'published';
@@ -266,10 +277,6 @@ export class AutonomousPipelineService {
     }
   }
 
-  /**
-   * Direct Flash call — no full article pipeline.
-   * maxOutputTokens: 80 caps the response to ~1 sentence.
-   */
   private async generateMetaDescription(title: string, content: string): Promise<string> {
     try {
       const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
