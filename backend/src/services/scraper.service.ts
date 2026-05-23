@@ -6,7 +6,6 @@ import logger from '../config/logger';
 export class ScraperService {
   async extract(url: string): Promise<{ text: string; title: string; wordCount: number }> {
     try {
-      // Validate URL
       new URL(url);
     } catch {
       throw new Error('Invalid URL');
@@ -16,11 +15,25 @@ export class ScraperService {
 
     const response = await axios.get(url, {
       timeout: 15000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ContomatorAI/1.0)' }
+      maxRedirects: 10,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
     });
 
-    const html = response.data;
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(response.data);
+
+    // Handle meta-refresh redirects (used by Google News)
+    const metaRefresh = $('meta[http-equiv="refresh"]').attr('content');
+    if (metaRefresh) {
+      const match = metaRefresh.match(/url=(.+)/i);
+      if (match) {
+        logger.info(`Following meta-refresh to: ${match[1]}`);
+        return this.extract(match[1]);
+      }
+    }
 
     // Remove unwanted elements
     $('script, style, nav, footer, header, aside, .sidebar, .menu, .ad, .social, .comments').remove();
@@ -30,7 +43,16 @@ export class ScraperService {
 
     // Try to get main content area
     let mainContent = '';
-    const articleSelectors = ['article', '[role="main"]', 'main', '.post-content', '.article-body', '#content'];
+    const articleSelectors = [
+      'article',
+      '[role="main"]',
+      'main',
+      '.post-content',
+      '.article-body',
+      '#content',
+      '.entry-content',
+      '.story-body',
+    ];
     for (const sel of articleSelectors) {
       const el = $(sel);
       if (el.length) {
@@ -39,7 +61,6 @@ export class ScraperService {
       }
     }
     if (!mainContent) {
-      // Fallback to body text with some filtering
       mainContent = $('body').text();
     }
 

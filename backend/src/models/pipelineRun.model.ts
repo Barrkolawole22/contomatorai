@@ -12,7 +12,7 @@ export interface IPipelineRun extends Document {
   results: Array<{
     topic: string;
     contentId?: mongoose.Types.ObjectId;
-    status: 'generated' | 'published' | 'failed';
+    status: 'generated' | 'published' | 'failed' | 'skipped';
     error?: string;
   }>;
 }

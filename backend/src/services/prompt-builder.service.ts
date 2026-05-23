@@ -1,4 +1,4 @@
-// backend/src/services/prompt-builder.service.ts - IMPROVED RAG + GROUNDING VERSION
+// backend/src/services/prompt-builder.service.ts
 import logger from '../config/logger';
 
 interface InternalLink {
@@ -48,30 +48,26 @@ export class PromptBuilderService {
 
     let prompt = '';
 
-    /**
-     * ============================================================
-     * OPENING + SOURCE GROUNDING (MOST IMPORTANT SECTION)
-     * ============================================================
-     */
+    // ============================================================
+    // OPENING + SOURCE GROUNDING
+    // ============================================================
 
     prompt += `Write a comprehensive, engaging, high-quality article about "${keyword}" for ${audience}.\n\n`;
 
-    // STRONG RAG GROUNDING — placed EARLY for token priority
     if (options.additionalContext) {
+      prompt += `CRITICAL SOURCE MATERIAL -- YOU MUST USE THIS:
 
-      prompt += `CRITICAL SOURCE MATERIAL — YOU MUST USE THIS:
-
-The following content comes from the user's knowledgebase and is your PRIMARY source of truth for this article.
+The following content comes from the source article and is your PRIMARY reference.
 
 YOU MUST:
 - Base the article primarily on this material
-- Incorporate relevant facts, examples, explanations, terminology, and insights from this source throughout the article
+- Incorporate relevant facts, examples, explanations, and insights from this source
 - Expand and explain the ideas naturally and clearly
 - Maintain factual consistency with the provided material
 
 YOU MUST NOT:
 - Ignore this material
-- Invent statistics, studies, cases, quotes, citations, or factual claims not supported by the source
+- Invent statistics, studies, cases, quotes, or factual claims not supported by the source
 - Contradict the source material
 - Fabricate examples pretending they came from the source
 
@@ -84,11 +80,9 @@ ${options.additionalContext}
 `;
     }
 
-    /**
-     * ============================================================
-     * TARGET LENGTH
-     * ============================================================
-     */
+    // ============================================================
+    // TARGET LENGTH
+    // ============================================================
 
     prompt += `TARGET LENGTH: Approximately ${targetWordCount} words
 
@@ -96,124 +90,119 @@ Aim close to the target naturally. A strong, complete article is more important 
 
 `;
 
-    /**
-     * ============================================================
-     * RETRY ATTEMPT HANDLING
-     * ============================================================
-     */
+    // ============================================================
+    // RETRY ATTEMPT HANDLING
+    // ============================================================
 
     if (attempt > 1) {
       prompt += `IMPORTANT RETRY INSTRUCTIONS:
 
-The previous generation attempt had quality issues.
-
-You MUST:
+The previous generation attempt had quality issues. You MUST:
 - Write complete, fully developed sections
-- Avoid abrupt endings
-- Avoid placeholders
+- Avoid abrupt endings and placeholders
 - Ensure logical flow between sections
 - Finish with a satisfying conclusion
-- Maintain depth and specificity throughout
 
 `;
     }
 
-    /**
-     * ============================================================
-     * WRITING STYLE
-     * ============================================================
-     */
+    // ============================================================
+    // WRITING STYLE
+    // ============================================================
 
     prompt += `WRITING STYLE:
 
 Think like an expert writer for ${this.getStyleReference(style)}.
 
-Your goal is to:
-- Inform clearly
-- Engage naturally
-- Provide practical value
-- Sound human and thoughtful
-- Avoid robotic phrasing
+Your goal is to inform clearly, engage naturally, provide practical value, and sound human and thoughtful.
 
 Tone: ${tone}
 
-Audience level:
-${this.getAudienceDescription(audience)}
+Audience level: ${this.getAudienceDescription(audience)}
 
 `;
 
-    /**
-     * ============================================================
-     * CONTENT STRUCTURE
-     * ============================================================
-     */
+    // ============================================================
+    // HEADLINE RULES -- THE MOST IMPORTANT SECTION FOR TITLE QUALITY
+    // ============================================================
+
+    prompt += `HEADLINE (H1 TITLE) RULES -- READ CAREFULLY:
+
+The title must be plain, direct, and journalistic. Think newspaper headline, not blog post SEO title.
+
+RULES:
+- Use the source headline as your starting point
+- Keep it short -- ideally under 10 words, maximum 12
+- NO colons, NO semicolons, NO em-dashes splitting two clauses
+- NO subtitle after the main title
+- NO buzzwords: avoid "navigating", "unyielding", "comprehensive", "ultimate", "in-depth", "exploring", "delving", "crucial", "vital", "game-changing", "transformative", "landscape", "realm", "journey", "unveiling", "empowering"
+- NO AI-sounding phrases: avoid "In today's world", "In an era of", "It is worth noting"
+- Write it like a journalist, not a content marketer
+
+GOOD examples (plain, direct, under 12 words):
+- "BOSCON and Nigerian Law Society Award Blue Silk Despite Legal Dispute"
+- "Tinubu Does Not Plan to Rename Nigeria or Abolish Sharia Law"
+- "Nigeria Faces Mounting Pressure Over New Electoral Guidelines"
+- "Court Rules Against Meta in User Data Privacy Case"
+
+BAD examples (do NOT write titles like these):
+- "Navigating the Misinformation Maze: The Truth About Tinubu's Alleged Plans" (colon + too long + buzzword)
+- "The Unyielding Path of Professional Recognition: BOSCON's Blue Silk Amidst Legal Turmoil" (colon + flowery + vague)
+- "Understanding the Complex Landscape of Nigerian Legal Recognition in 2026" (vague + buzzwords)
+- "Exploring How Nigeria's Legal System Handles Professional Disputes" (starts with "Exploring")
+
+If the source has a clear, plain headline already -- use it directly or simplify it slightly.
+
+`;
+
+    // ============================================================
+    // CONTENT STRUCTURE
+    // ============================================================
 
     prompt += `CONTENT STRUCTURE:
 
-1. COMPELLING HEADLINE
-
-Write a specific, benefit-focused headline.
-
-Good headlines:
-- "How AI Writing Tools Cut Content Creation Time by 60%"
-- "Why Traditional Marketing Funnels Are Failing in 2026"
-- "12 Remote Work Productivity Strategies That Actually Work"
-
-Avoid generic headlines unless the article is truly comprehensive.
+1. HEADLINE
+Follow the headline rules above strictly.
 
 ---
 
 2. STRONG OPENING (150-250 words)
 
-Hook readers immediately using:
+Hook readers immediately using one of:
 - A surprising insight
 - A relatable challenge
 - A bold statement
 - A compelling scenario
-- A meaningful observation
 
-Then establish:
-- Why the topic matters
-- Why readers should care now
-- What readers will gain
+Then establish why the topic matters and what readers will gain.
 
 ---
 
 3. MAIN BODY
 
-Organize the article around 4-6 meaningful sections.
-
-Each section should:
+Organize around 4-6 meaningful sections. Each section should:
 - Start with a clear core idea
 - Explain why it matters
-- Include concrete details
-- Use examples where relevant
-- Deliver practical insight
-- Connect naturally to the next idea
+- Include concrete details and examples
+- Connect naturally to the next section
 
-SECTION GUIDELINES:
-
-- Use descriptive H2 headings
-- Develop sections thoroughly (250-400 words)
+Section guidelines:
+- Use descriptive H2 headings (apply the same plain-language rules as the H1)
+- Develop sections thoroughly (250-400 words each)
 - Keep paragraphs readable
 - Vary sentence structure naturally
-- Use transitions between ideas
-- Include specifics instead of vague statements
 
 `;
 
-    /**
-     * ============================================================
-     * INTERNAL LINKS
-     * ============================================================
-     */
+    // ============================================================
+    // INTERNAL LINKS
+    // ============================================================
 
     if (
       options.includeInternalLinks &&
       options.internalLinkSuggestions &&
       options.internalLinkSuggestions.length > 0
     ) {
-
       const maxLinks = options.maxInternalLinks || 5;
 
       prompt += `INTERNAL LINKING REQUIREMENTS:
@@ -223,27 +212,22 @@ Include up to ${maxLinks} internal links naturally throughout the article.
 AVAILABLE INTERNAL LINKS:
 
 ${options.internalLinkSuggestions.map((link, index) =>
-`${index + 1}. "${link.title}" (${link.url})${link.description ? `\n   Context: ${link.description}` : ''}`
+  `${index + 1}. "${link.title}" (${link.url})${link.description ? `\n   Context: ${link.description}` : ''}`
 ).join('\n')}
 
 BEST PRACTICES:
 - Link naturally where readers would genuinely benefit
-- Use descriptive anchor text
-- Avoid "click here"
+- Use descriptive anchor text, not "click here"
 - Spread links across multiple sections
-- Integrate links conversationally
 
-HTML FORMAT:
-<a href="URL">descriptive anchor text</a>
+HTML FORMAT: <a href="URL">descriptive anchor text</a>
 
 `;
     }
 
-    /**
-     * ============================================================
-     * OPTIONAL CONTENT FEATURES
-     * ============================================================
-     */
+    // ============================================================
+    // OPTIONAL CONTENT FEATURES
+    // ============================================================
 
     if (options.includeStatistics) {
       prompt += `STATISTICS:
@@ -269,86 +253,62 @@ HTML FORMAT:
 `;
     }
 
-    /**
-     * ============================================================
-     * FAQ SECTION
-     * ============================================================
-     */
+    // ============================================================
+    // FAQ SECTION
+    // ============================================================
 
     if (options.includeFAQ) {
-
       prompt += `4. FREQUENTLY ASKED QUESTIONS
 
 Include 5-7 practical questions readers commonly ask about "${keyword}".
 
-FAQ ANSWERS SHOULD:
-- Be direct and useful
-- Stay concise
-- Remain grounded in the provided source material
-- Avoid generic filler responses
+FAQ answers should be direct, concise, and grounded in the source material.
 
 `;
     }
 
-    /**
-     * ============================================================
-     * CONCLUSION
-     * ============================================================
-     */
+    // ============================================================
+    // CONCLUSION
+    // ============================================================
 
     prompt += `${options.includeFAQ ? '5' : '4'}. STRONG CONCLUSION (150-200 words)
 
 The conclusion should:
 - Summarize the key takeaways
 - Reinforce the article's core message
-- Leave readers with clarity or direction
 - End naturally and confidently
 
 `;
 
     if (options.callToAction) {
-      prompt += `Include this call-to-action naturally:
-${options.callToAction}
+      prompt += `Include this call-to-action naturally: ${options.callToAction}
 
 `;
     }
 
-    /**
-     * ============================================================
-     * QUALITY STANDARDS
-     * ============================================================
-     */
+    // ============================================================
+    // QUALITY STANDARDS
+    // ============================================================
 
     prompt += `QUALITY STANDARDS:
 
 Write like a knowledgeable human expert speaking clearly to an intelligent reader.
 
-PRIORITIZE:
-- Specificity
-- Clarity
-- Natural flow
-- Useful insights
-- Real explanations
-- Concrete examples
+PRIORITIZE: Specificity, clarity, natural flow, useful insights, concrete examples.
 
 AVOID:
-- Generic filler
-- Repetitive phrasing
+- Generic filler and repetitive phrasing
 - Buzzword-heavy writing
-- Obvious statements without depth
+- AI-sounding introductions ("In today's fast-paced world...")
 - Keyword stuffing
-- Fabricated claims
-- Fake studies or citations
-- AI-sounding introductions
+- Fabricated claims, fake studies, or invented citations
 - Empty motivational language
 
 `;
 
-    /**
-     * ============================================================
-     * SEO GUIDANCE
-     * ============================================================
-     */
+    // ============================================================
+    // SEO GUIDANCE
+    // ============================================================
 
     prompt += `SEO INTEGRATION:
 
@@ -356,17 +316,14 @@ ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)
 
 `;
 
-    /**
-     * ============================================================
-     * HTML FORMATTING
-     * ============================================================
-     */
+    // ============================================================
+    // HTML FORMATTING
+    // ============================================================
 
     prompt += `HTML FORMATTING:
 
 Use clean semantic HTML:
-
-- <h1> for the main title
+- <h1> for the main title (one only)
 - <h2> for major sections
 - <h3> for subsections
 - <p> for paragraphs
@@ -377,142 +334,97 @@ Do NOT include markdown.
 
 `;
 
-    /**
-     * ============================================================
-     * EXTERNAL LINKS
-     * ============================================================
-     */
+    // ============================================================
+    // EXTERNAL LINKS
+    // ============================================================
 
     if (options.includeExternalLinks) {
-
       prompt += `EXTERNAL LINKING:
 
-Where genuinely relevant, include 2-3 authoritative external references.
+Where genuinely relevant, include 2-3 authoritative external references (Wikipedia, .gov, .edu, major publications).
 
-PREFER:
-- Wikipedia
-- Government websites (.gov)
-- Academic institutions (.edu)
-- Major trusted publications
+FORMAT: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
 
-FORMAT:
-<a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
-
-IMPORTANT:
-- Only include URLs you are highly confident are real and valid
-- Do NOT invent URLs
-- Do NOT fabricate research sources
-- If uncertain, omit the link instead of hallucinating
+IMPORTANT: Only include URLs you are highly confident are real. Do NOT invent URLs.
 
 `;
     }
 
-    /**
-     * ============================================================
-     * CUSTOM REQUIREMENTS
-     * ============================================================
-     */
+    // ============================================================
+    // CUSTOM REQUIREMENTS
+    // ============================================================
 
     if (options.customPrompt) {
-
-      prompt += `ADDITIONAL REQUIREMENTS:
-
-${options.customPrompt}
-
-`;
+      prompt += `ADDITIONAL REQUIREMENTS:\n\n${options.customPrompt}\n\n`;
     }
 
     if (options.extraInstructions) {
-
-      prompt += `EXTRA GUIDELINES:
-
-${options.extraInstructions}
-
-`;
+      prompt += `EXTRA GUIDELINES:\n\n${options.extraInstructions}\n\n`;
     }
 
-    /**
-     * ============================================================
-     * FINAL GROUNDING REMINDER (VERY IMPORTANT)
-     * ============================================================
-     */
+    // ============================================================
+    // FINAL REMINDER
+    // ============================================================
 
-    prompt += `IMPORTANT FINAL REMINDER:
+    prompt += `FINAL REMINDER:
 
-You MUST:
-- Use the provided source material throughout the article
+- Follow the headline rules strictly -- short, plain, no colons, no buzzwords
+- Use the provided source material throughout
 - Ground factual claims in the supplied context
-- Maintain consistency with the knowledgebase
-- Prioritize factual accuracy over creativity
+- Do not invent unsupported claims, statistics, or citations
 
-You MUST NOT:
-- Invent unsupported claims
-- Fabricate statistics or citations
-- Add fake case studies or research
-- Contradict the provided material
-
-Now write the complete article.
-
-Start with <h1> and continue through a complete, satisfying conclusion.
+Now write the complete article. Start with <h1> and finish with a complete conclusion.
 `;
 
     return prompt;
   }
 
   buildSystemMessage(): string {
-
-    return `You are an expert content writer known for producing thoughtful, engaging, natural-sounding articles.
+    return `You are an expert content writer known for producing clear, direct, human-sounding articles.
 
 YOUR CORE PRINCIPLES:
 
-1. SOURCE MATERIAL IS AUTHORITATIVE
+1. PLAIN HEADLINES
+Write titles like a newspaper editor, not a content marketer.
+Short. Direct. No colons splitting two clauses. No buzzwords.
+If the source has a usable headline, adapt it directly.
+
+2. SOURCE MATERIAL IS AUTHORITATIVE
 When source material is provided, treat it as the primary factual reference.
+Base the article on it. Do not fabricate claims, statistics, or citations.
 
-You MUST:
-- Base the article on the provided material
-- Expand and explain naturally
-- Preserve factual consistency
+3. CLARITY OVER COMPLEXITY
+Write clearly and directly. Avoid unnecessary jargon.
 
-You MUST NOT:
-- Fabricate claims
-- Invent statistics
-- Create fake citations
-- Add unsupported facts
-
-2. CLARITY OVER COMPLEXITY
-Write clearly and directly.
-Avoid unnecessary jargon.
-Explain ideas naturally.
-
-3. SPECIFICITY OVER VAGUENESS
+4. SPECIFICITY OVER VAGUENESS
 Use concrete details and meaningful examples.
 
-4. VALUE OVER FLUFF
+5. VALUE OVER FLUFF
 Every paragraph should contribute useful information.
 
-5. NATURAL HUMAN FLOW
-Vary sentence structure.
-Use smooth transitions.
-Avoid robotic repetition.
-
-6. WRITE FOR PEOPLE FIRST
-Prioritize readability and usefulness over SEO manipulation.
+6. NATURAL HUMAN FLOW
+Vary sentence structure. Use smooth transitions. Avoid robotic repetition.
 
 FORMATTING RULES:
-- Use semantic HTML
-- Use <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <a>
+- Use semantic HTML: <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <a>
+- One <h1> only -- the main title
 - Keep formatting clean and valid
+- No markdown
 
-AVOID COMMON AI WRITING PATTERNS:
+AVOID THESE AI WRITING PATTERNS AT ALL TIMES:
 - "In today's fast-paced world..."
+- "It is worth noting that..."
+- "In an era of..."
+- "Navigating the [noun] landscape"
+- "Exploring the [adjective] realm of"
+- "The unyielding/transformative/comprehensive journey"
+- Colons splitting headline into title + subtitle
 - Generic filler openings
-- Buzzword-heavy paragraphs
-- Repetitive sentence structures
-- Fabricated statistics
-- Empty conclusions
+- Fabricated statistics or studies
 - Keyword stuffing
+- Empty conclusions
 
-Write like a credible human expert who genuinely understands the topic.`;
+Write like a credible human journalist or subject-matter expert.`;
   }
 
   private buildSEOGuidance(
@@ -520,64 +432,47 @@ Write like a credible human expert who genuinely understands the topic.`;
     focus?: string,
     density?: number
   ): string {
-
     let guidance = `Mention "${keyword}" naturally where relevant. `;
 
     switch (focus) {
-
       case 'primary_keyword':
-        guidance += `Use the exact phrase naturally throughout the article while maintaining readability.`;
+        guidance += `Use the exact phrase naturally throughout while maintaining readability.`;
         break;
-
       case 'semantic_keywords':
-        guidance += `Focus heavily on semantic relevance and related concepts.`;
+        guidance += `Focus on semantic relevance and related concepts.`;
         break;
-
       case 'long_tail':
         guidance += `Target long-tail keyword variations naturally within headings and content.`;
         break;
-
       default:
         guidance += `Balance the primary keyword with natural language and semantic variations.`;
     }
 
     if (density && density > 0) {
-      guidance += `
-
-Target keyword density:
-Approximately ${density}% — but natural writing quality takes priority over exact density.
-`;
+      guidance += `\n\nTarget keyword density: approximately ${density}% -- but natural writing quality takes priority.`;
     }
 
     return guidance;
   }
 
   private getStyleReference(style: string): string {
-
-    const references = {
+    const references: Record<string, string> = {
       conversational: 'a thoughtful Medium or Atlantic writer',
       academic: 'an accessible but authoritative academic researcher',
       journalistic: 'a professional investigative journalist',
       technical: 'a precise technical educator or engineer',
-      creative: 'a narrative feature writer'
+      creative: 'a narrative feature writer',
     };
-
-    return references[style as keyof typeof references] || references.conversational;
+    return references[style] || references.conversational;
   }
 
   private getAudienceDescription(audience: string): string {
-
     if (audience.toLowerCase().includes('beginner')) {
       return 'Explain concepts clearly without assuming prior knowledge.';
     }
-
-    if (
-      audience.toLowerCase().includes('expert') ||
-      audience.toLowerCase().includes('advanced')
-    ) {
+    if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) {
       return 'Assume familiarity with fundamentals and focus on deeper insights.';
     }
-
     return 'Balance accessibility with meaningful depth.';
   }
 
@@ -590,14 +485,11 @@ Approximately ${density}% — but natural writing quality takes priority over ex
     missingLinks: InternalLink[];
     issues: string[];
   } {
-
     const issues: string[] = [];
     const missingLinks: InternalLink[] = [];
-
     let foundLinks = 0;
 
     for (const link of requiredLinks) {
-
       if (content.includes(link.url)) {
         foundLinks++;
       } else {
@@ -606,7 +498,6 @@ Approximately ${density}% — but natural writing quality takes priority over ex
     }
 
     const minRequired = Math.ceil(requiredLinks.length * 0.5);
-
     const valid = foundLinks >= minRequired;
 
     if (!valid) {
@@ -615,47 +506,25 @@ Approximately ${density}% — but natural writing quality takes priority over ex
       );
     }
 
-    const anchorTags =
-      content.match(/<a\s+href="[^"]+">.*?<\/a>/gi) || [];
-
+    const anchorTags = content.match(/<a\s+href="[^"]+">.*?<\/a>/gi) || [];
     if (anchorTags.length < foundLinks) {
-      issues.push(
-        'Some URLs were found but not properly formatted as anchor tags'
-      );
+      issues.push('Some URLs were found but not properly formatted as anchor tags');
     }
 
     logger.info(
       `Internal link validation: ${foundLinks}/${requiredLinks.length} links found, valid: ${valid}`
     );
 
-    return {
-      valid,
-      foundLinks,
-      missingLinks,
-      issues
-    };
+    return { valid, foundLinks, missingLinks, issues };
   }
 
-  extractInternalLinks(
-    content: string
-  ): Array<{ url: string; anchorText: string }> {
-
-    const linkRegex =
-      /<a\s+href="([^"]+)">([^<]+)<\/a>/gi;
-
-    const links: Array<{
-      url: string;
-      anchorText: string;
-    }> = [];
-
+  extractInternalLinks(content: string): Array<{ url: string; anchorText: string }> {
+    const linkRegex = /<a\s+href="([^"]+)">([^<]+)<\/a>/gi;
+    const links: Array<{ url: string; anchorText: string }> = [];
     let match;
 
     while ((match = linkRegex.exec(content)) !== null) {
-
-      links.push({
-        url: match[1],
-        anchorText: match[2]
-      });
+      links.push({ url: match[1], anchorText: match[2] });
     }
 
     return links;

@@ -1,5 +1,5 @@
 // backend/src/services/gemini.service.ts
-// UPDATED VERSION WITH RELAXED VALIDATION + BETTER GROUNDING
+// UPDATED VERSION — proper retry-after handling + meta description support
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env';
@@ -51,9 +51,7 @@ interface ContentGenerationOptions {
 }
 
 export class GeminiService {
-
   private genAI: GoogleGenerativeAI | null = null;
-
   private apiKey: string | undefined;
 
   private readonly MODELS = {
@@ -62,110 +60,61 @@ export class GeminiService {
   };
 
   constructor() {
-
-    this.apiKey =
-      env.GEMINI_API_KEY ||
-      process.env.GEMINI_API_KEY;
+    this.apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
     if (!this.apiKey) {
       throw new Error('GEMINI_API_KEY is required');
     }
 
-    this.genAI =
-      new GoogleGenerativeAI(this.apiKey);
-
-    logger.info(
-      'Gemini service initialized (Flash & Pro)'
-    );
+    this.genAI = new GoogleGenerativeAI(this.apiKey);
+    logger.info('Gemini service initialized (Flash & Pro)');
   }
 
   async generateBlogPost(
     keyword: string,
     options: ContentGenerationOptions = {}
   ): Promise<GeneratedContent> {
-
     if (!this.genAI) {
       throw new Error('Gemini service not initialized');
     }
 
-    const modelVariant =
-      options.modelVariant || 'flash';
-
-    const modelString =
-      this.MODELS[modelVariant];
+    const modelVariant = options.modelVariant || 'flash';
+    const modelString = this.MODELS[modelVariant];
 
     // Only Pro supports grounding
-    const enableGrounding =
-      options.enableGrounding &&
-      modelVariant === 'pro';
+    const enableGrounding = options.enableGrounding && modelVariant === 'pro';
 
-    logger.info(
-      `Using Gemini model: ${modelString}, grounding: ${
-        enableGrounding ? 'on' : 'off'
-      }`
-    );
+    logger.info(`Using Gemini model: ${modelString}, grounding: ${enableGrounding ? 'on' : 'off'}`);
 
-    const targetWordCount =
-      options.wordCount || 1500;
-
+    const targetWordCount = options.wordCount || 1500;
     const maxRetries = 2;
-
     let lastError: Error | null = null;
 
-    for (
-      let attempt = 1;
-      attempt <= maxRetries;
-      attempt++
-    ) {
-
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-
         if (attempt > 1) {
-
-          logger.info(
-            `Gemini retry attempt ${attempt}/${maxRetries}`
-          );
+          logger.info(`Gemini retry attempt ${attempt}/${maxRetries}`);
         }
 
-        const content =
-          await this.generateContent(
-            keyword,
-            options,
-            targetWordCount,
-            attempt,
-            modelString,
-            enableGrounding
+        const content = await this.generateContent(
+          keyword,
+          options,
+          targetWordCount,
+          attempt,
+          modelString,
+          enableGrounding
+        );
+
+        // Internal link validation
+        if (options.includeInternalLinks && options.internalLinkSuggestions?.length) {
+          const validation = promptBuilder.validateInternalLinks(
+            content.content,
+            options.internalLinkSuggestions
           );
 
-        /**
-         * ============================================================
-         * INTERNAL LINK VALIDATION
-         * ============================================================
-         */
-
-        if (
-          options.includeInternalLinks &&
-          options.internalLinkSuggestions?.length
-        ) {
-
-          const validation =
-            promptBuilder.validateInternalLinks(
-              content.content,
-              options.internalLinkSuggestions
-            );
-
-          if (
-            !validation.valid &&
-            attempt < maxRetries
-          ) {
-
-            logger.warn(
-              `Internal link validation failed: ${validation.issues.join(', ')}`
-            );
-
-            throw new Error(
-              'Internal links not properly included'
-            );
+          if (!validation.valid && attempt < maxRetries) {
+            logger.warn(`Internal link validation failed: ${validation.issues.join(', ')}`);
+            throw new Error('Internal links not properly included');
           }
 
           logger.info(
@@ -174,14 +123,21 @@ export class GeminiService {
         }
 
         return content;
-
       } catch (error: any) {
-
         lastError = error;
 
-        logger.warn(
-          `Gemini attempt ${attempt} failed: ${error.message}`
-        );
+        // Extract the retry delay Gemini tells us to use, then honour it.
+        // The delay is embedded in the error message JSON as "retryDelay":"Xs"
+        const retryDelayMs = this.extractRetryDelayMs(error);
+
+        if (retryDelayMs > 0 && attempt < maxRetries) {
+          logger.warn(
+            `Gemini attempt ${attempt} failed (quota). Honouring retry-after: ${retryDelayMs}ms`
+          );
+          await this.delay(retryDelayMs);
+        } else {
+          logger.warn(`Gemini attempt ${attempt} failed: ${error.message}`);
+        }
 
         if (attempt === maxRetries) {
           throw lastError;
@@ -189,12 +145,34 @@ export class GeminiService {
       }
     }
 
-    throw (
-      lastError ||
-      new Error(
-        'Gemini content generation failed after retries'
-      )
-    );
+    throw lastError || new Error('Gemini content generation failed after retries');
+  }
+
+  /**
+   * Parse the retry delay from a Gemini 429 error message.
+   * Gemini embeds it as `"retryDelay":"Xs"` in the error JSON body.
+   * Falls back to 0 if not found, letting the caller decide what to do.
+   */
+  private extractRetryDelayMs(error: any): number {
+    try {
+      const msg: string = error?.message || '';
+
+      // Try to find retryDelay in the JSON blob inside the error message
+      const retryDelayMatch = msg.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+      if (retryDelayMatch) {
+        const seconds = parseFloat(retryDelayMatch[1]);
+        return Math.ceil(seconds * 1000);
+      }
+
+      // Fallback: try the standard HTTP Retry-After header (if axios surfaces it)
+      const retryAfter = error?.response?.headers?.['retry-after'];
+      if (retryAfter) {
+        return parseInt(retryAfter, 10) * 1000;
+      }
+    } catch {
+      // swallow — not critical
+    }
+    return 0;
   }
 
   private async generateContent(
@@ -205,7 +183,6 @@ export class GeminiService {
     modelString: string,
     enableGrounding: boolean
   ): Promise<GeneratedContent> {
-
     const generationConfig = {
       temperature: 0.7,
       topP: 0.95,
@@ -213,562 +190,215 @@ export class GeminiService {
       maxOutputTokens: 8192,
     };
 
-    /**
-     * ============================================================
-     * GROUNDING TOOLS
-     * ============================================================
-     */
+    const tools = enableGrounding ? [{ googleSearchRetrieval: {} }] : undefined;
 
-    const tools =
-      enableGrounding
-        ? [{ googleSearchRetrieval: {} }]
-        : undefined;
+    const model = this.genAI!.getGenerativeModel({
+      model: modelString,
+      generationConfig,
+      systemInstruction: promptBuilder.buildSystemMessage(),
+      tools,
+    });
 
-    const model =
-      this.genAI!.getGenerativeModel({
-        model: modelString,
-        generationConfig,
-        systemInstruction:
-          promptBuilder.buildSystemMessage(),
-        tools,
-      });
-
-    const prompt =
-      promptBuilder.buildMasterPrompt(
-        keyword,
-        options,
-        attempt
-      );
+    const prompt = promptBuilder.buildMasterPrompt(keyword, options, attempt);
 
     try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const generatedText = response.text();
 
-      const result =
-        await model.generateContent(prompt);
-
-      const response =
-        await result.response;
-
-      const generatedText =
-        response.text();
-
-      if (
-        !generatedText ||
-        generatedText.length < 200
-      ) {
-
-        throw new Error(
-          'Generated content too short - minimum 200 characters required'
-        );
+      if (!generatedText || generatedText.length < 200) {
+        throw new Error('Generated content too short - minimum 200 characters required');
       }
 
-      /**
-       * ============================================================
-       * QUALITY DETECTION
-       * ============================================================
-       */
-
-      if (
-        this.detectQualityIssues(generatedText)
-      ) {
-
-        logger.warn(
-          'Quality issues detected - cleaning content'
-        );
-
-        const cleaned =
-          this.cleanContent(generatedText);
-
+      if (this.detectQualityIssues(generatedText)) {
+        logger.warn('Quality issues detected - cleaning content');
+        const cleaned = this.cleanContent(generatedText);
         if (cleaned.length < 200) {
-
-          throw new Error(
-            'Content quality too low after cleaning'
-          );
+          throw new Error('Content quality too low after cleaning');
         }
       }
 
-      const parsedContent =
-        this.parseContent(
-          generatedText,
-          keyword
-        );
+      const parsedContent = this.parseContent(generatedText, keyword);
 
-      const validationIssues =
-        this.validateContentQuality(
-          parsedContent.content,
-          targetWordCount
-        );
+      const validationIssues = this.validateContentQuality(parsedContent.content, targetWordCount);
 
       if (validationIssues.length > 0) {
+        logger.warn('Content quality issues:', validationIssues);
 
-        logger.warn(
-          'Content quality issues:',
-          validationIssues
-        );
-
-        const criticalIssues =
-          validationIssues.filter(issue =>
+        const criticalIssues = validationIssues.filter(
+          issue =>
             issue.includes('too short') ||
             issue.includes('placeholder') ||
             issue.includes('incomplete')
-          );
+        );
 
         if (criticalIssues.length > 0) {
-
-          throw new Error(
-            `Content quality failed: ${criticalIssues.join(', ')}`
-          );
+          throw new Error(`Content quality failed: ${criticalIssues.join(', ')}`);
         }
       }
 
-      const actualWords =
-        this.countWords(parsedContent.content);
-
-      if (
-        actualWords >
-        targetWordCount * 2
-      ) {
-
-        logger.warn(
-          `Content ${actualWords} words (target: ${targetWordCount}). Overlength but keeping.`
-        );
+      const actualWords = this.countWords(parsedContent.content);
+      if (actualWords > targetWordCount * 2) {
+        logger.warn(`Content ${actualWords} words (target: ${targetWordCount}). Overlength but keeping.`);
       }
 
-      logger.info(
-        `Gemini generated ${parsedContent.wordCount} words`
-      );
-
+      logger.info(`Gemini generated ${parsedContent.wordCount} words`);
       return parsedContent;
-
     } catch (error: any) {
-
-      logger.error(
-        `Gemini generation error: ${error.message}`
-      );
-
-      throw new Error(
-        `Gemini failed: ${error.message}`
-      );
+      logger.error(`Gemini generation error: ${error.message}`);
+      throw new Error(`Gemini failed: ${error.message}`);
     }
   }
 
-  /**
-   * ============================================================
-   * RELAXED CONTENT VALIDATION
-   * ============================================================
-   */
-
-  private validateContentQuality(
-    content: string,
-    targetWordCount: number
-  ): string[] {
-
+  private validateContentQuality(content: string, targetWordCount: number): string[] {
     const issues: string[] = [];
+    const wordCount = this.countWords(content);
 
-    const wordCount =
-      this.countWords(content);
-
-    /**
-     * Relaxed minimum length:
-     * 0.4 -> 0.3
-     */
-
-    if (
-      wordCount <
-      targetWordCount * 0.3
-    ) {
-
-      issues.push(
-        `Content too short: ${wordCount} words (target: ${targetWordCount})`
-      );
+    if (wordCount < targetWordCount * 0.3) {
+      issues.push(`Content too short: ${wordCount} words (target: ${targetWordCount})`);
     }
 
-    /**
-     * Placeholder detection
-     */
-
-    if (
-      content.includes('[continue') ||
-      content.includes('[insert')
-    ) {
-
-      issues.push(
-        'Contains placeholder text'
-      );
+    if (content.includes('[continue') || content.includes('[insert')) {
+      issues.push('Contains placeholder text');
     }
 
-    /**
-     * Broken HTML entities
-     */
-
-    if (
-      content.includes('&lt;') ||
-      content.includes('&gt;') ||
-      content.includes('&amp;')
-    ) {
-
-      issues.push(
-        'Contains broken HTML entities'
-      );
+    if (content.includes('&lt;') || content.includes('&gt;') || content.includes('&amp;')) {
+      issues.push('Contains broken HTML entities');
     }
 
-    /**
-     * Incomplete article detection
-     */
-
-    if (
-      wordCount <
-      targetWordCount * 0.5
-    ) {
-
-      const lastPara =
-        content
-          .trim()
-          .split(/\n/)
-          .pop() || '';
-
-      const lastText =
-        lastPara
-          .replace(/<[^>]*>/g, '')
-          .trim();
-
-      if (
-        lastText &&
-        !lastText.match(/[.!?]$/)
-      ) {
-
-        issues.push(
-          'Content appears incomplete (no ending punctuation)'
-        );
+    if (wordCount < targetWordCount * 0.5) {
+      const lastPara = content.trim().split(/\n/).pop() || '';
+      const lastText = lastPara.replace(/<[^>]*>/g, '').trim();
+      if (lastText && !lastText.match(/[.!?]$/)) {
+        issues.push('Content appears incomplete (no ending punctuation)');
       }
     }
-
-    /**
-     * REMOVED:
-     * - H2 count validation
-     * - Paragraph count validation
-     */
 
     return issues;
   }
 
-  /**
-   * ============================================================
-   * QUALITY ISSUE DETECTION
-   * ============================================================
-   */
-
-  private detectQualityIssues(
-    text: string
-  ): boolean {
-
-    const words =
-      text
-        .toLowerCase()
-        .split(/\s+/);
-
-    const wordFrequency =
-      new Map<string, number>();
+  private detectQualityIssues(text: string): boolean {
+    const words = text.toLowerCase().split(/\s+/);
+    const wordFrequency = new Map<string, number>();
 
     for (const word of words) {
-
       if (word.length > 4) {
-
-        wordFrequency.set(
-          word,
-          (wordFrequency.get(word) || 0) + 1
-        );
+        wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1);
       }
     }
 
-    const maxFrequency =
-      Math.max(
-        ...Array.from(wordFrequency.values())
-      );
+    const maxFrequency = Math.max(...Array.from(wordFrequency.values()));
+    if (maxFrequency > 25) return true;
 
-    if (maxFrequency > 25) {
-      return true;
-    }
-
-    const placeholderPatterns = [
-      /\[continue.*?\]/i,
-      /\[insert.*?\]/i,
-      /\.{3,}/g
-    ];
-
+    const placeholderPatterns = [/\[continue.*?\]/i, /\[insert.*?\]/i, /\.{3,}/g];
     for (const pattern of placeholderPatterns) {
-
-      if (pattern.test(text)) {
-        return true;
-      }
+      if (pattern.test(text)) return true;
     }
 
-    if (
-      text.includes('&lt;') ||
-      text.includes('&gt;') ||
-      text.includes('&amp;')
-    ) {
-
+    if (text.includes('&lt;') || text.includes('&gt;') || text.includes('&amp;')) {
       return true;
     }
 
     return false;
   }
 
-  /**
-   * ============================================================
-   * CONTENT CLEANING
-   * ============================================================
-   */
-
-  private cleanContent(
-    text: string
-  ): string {
-
-    text =
-      text.replace(/\[continue.*?\]/gi, '');
-
-    text =
-      text.replace(/\[insert.*?\]/gi, '');
-
-    text =
-      text
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"');
-
-    text =
-      text.replace(/\.{4,}/g, '...');
-
+  private cleanContent(text: string): string {
+    text = text.replace(/\[continue.*?\]/gi, '');
+    text = text.replace(/\[insert.*?\]/gi, '');
+    text = text
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"');
+    text = text.replace(/\.{4,}/g, '...');
     return text.trim();
   }
 
-  private smartTruncate(
-    content: string,
-    targetWordCount: number
-  ): string {
-
-    const paragraphs =
-      content.split(/<\/p>/i);
-
-    let truncated = '';
-
-    let currentWords = 0;
-
-    for (const para of paragraphs) {
-
-      const paraWords =
-        this.countWords(para);
-
-      if (
-        currentWords + paraWords <=
-        targetWordCount * 1.2
-      ) {
-
-        truncated += para + '</p>';
-
-        currentWords += paraWords;
-
-      } else {
-
-        break;
-      }
-    }
-
-    if (!truncated.includes('</h1>')) {
-
-      const h1Match =
-        content.match(
-          /<h1[^>]*>.*?<\/h1>/i
-        );
-
-      if (h1Match) {
-
-        truncated =
-          h1Match[0] +
-          '\n\n' +
-          truncated;
-      }
-    }
-
-    return truncated;
-  }
-
-  private countWords(
-    text: string
-  ): number {
-
-    const plainText =
-      text
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ');
-
+  private countWords(text: string): number {
+    const plainText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
     return plainText
       .trim()
       .split(/\s+/)
-      .filter(word => word.length > 0)
-      .length;
+      .filter(word => word.length > 0).length;
   }
 
-  private parseContent(
-    generatedText: string,
-    keyword: string
-  ): GeneratedContent {
-
-    const h1Match =
-      generatedText.match(
-        /<h1[^>]*>(.*?)<\/h1>/i
-      );
-
-    const title =
-      h1Match
-        ? h1Match[1]
-            .replace(/<[^>]*>/g, '')
-            .trim()
-        : this.generateFallbackTitle(keyword);
+  private parseContent(generatedText: string, keyword: string): GeneratedContent {
+    const h1Match = generatedText.match(/<h1[^>]*>(.*?)<\/h1>/i);
+    const title = h1Match
+      ? h1Match[1].replace(/<[^>]*>/g, '').trim()
+      : this.generateFallbackTitle(keyword);
 
     let content = generatedText;
-
     if (h1Match) {
-
-      content =
-        generatedText
-          .replace(h1Match[0], '')
-          .trim();
+      content = generatedText.replace(h1Match[0], '').trim();
     }
 
-    if (
-      !content.includes('<h') &&
-      !content.includes('<p>')
-    ) {
-
-      content =
-        this.addBasicFormatting(
-          content,
-          title
-        );
+    if (!content.includes('<h') && !content.includes('<p>')) {
+      content = this.addBasicFormatting(content, title);
     }
 
-    content =
-      this.cleanHTML(content);
+    content = this.cleanHTML(content);
 
     if (!content.startsWith('<h1>')) {
-
-      content =
-        `<h1>${title}</h1>\n\n${content}`;
+      content = `<h1>${title}</h1>\n\n${content}`;
     }
 
-    const plainText =
-      content
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ');
-
-    const words =
-      plainText
-        .trim()
-        .split(/\s+/)
-        .filter(word => word.length > 0);
+    const plainText = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    const words = plainText
+      .trim()
+      .split(/\s+/)
+      .filter(word => word.length > 0);
 
     return {
       title,
       content: content.trim(),
       wordCount: words.length,
-      summary:
-        plainText.substring(0, 200).trim() + '...'
+      summary: plainText.substring(0, 200).trim() + '...',
     };
   }
 
-  private addBasicFormatting(
-    text: string,
-    title: string
-  ): string {
-
-    const paragraphs =
-      text
-        .split(/\n\s*\n/)
-        .filter(p => p.trim());
-
-    const formatted =
-      paragraphs
-        .map(p => `<p>${p.trim()}</p>`)
-        .join('\n\n');
-
+  private addBasicFormatting(text: string, title: string): string {
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
+    const formatted = paragraphs.map(p => `<p>${p.trim()}</p>`).join('\n\n');
     return `<h1>${title}</h1>\n\n${formatted}`;
   }
 
-  private cleanHTML(
-    content: string
-  ): string {
-
+  private cleanHTML(content: string): string {
     return content
-      .replace(
-        /<script[^>]*>.*?<\/script>/gis,
-        ''
-      )
-      .replace(
-        /<style[^>]*>.*?<\/style>/gis,
-        ''
-      )
+      .replace(/<script[^>]*>.*?<\/script>/gis, '')
+      .replace(/<style[^>]*>.*?<\/style>/gis, '')
       .replace(/>\s+</g, '>\n<')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
-  private generateFallbackTitle(
-    keyword: string
-  ): string {
-
+  private generateFallbackTitle(keyword: string): string {
     return (
       keyword
         .split(' ')
-        .map(
-          word =>
-            word.charAt(0).toUpperCase() +
-            word.slice(1)
-        )
-        .join(' ') +
-      ': Complete Guide'
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ') + ': Complete Guide'
     );
   }
 
-  async checkService(): Promise<{
-    status: string;
-    model: string;
-  }> {
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
+  async checkService(): Promise<{ status: string; model: string }> {
     if (!this.genAI) {
-      throw new Error(
-        'Gemini service not initialized'
-      );
+      throw new Error('Gemini service not initialized');
     }
 
     try {
-
-      const model =
-        this.genAI.getGenerativeModel({
-          model: this.MODELS.flash
-        });
-
-      const result =
-        await model.generateContent('Test');
-
-      if (
-        (await result.response).text()
-      ) {
-
-        return {
-          status: 'operational',
-          model: this.MODELS.flash
-        };
+      const model = this.genAI.getGenerativeModel({ model: this.MODELS.flash });
+      const result = await model.generateContent('Test');
+      if ((await result.response).text()) {
+        return { status: 'operational', model: this.MODELS.flash };
       }
-
       throw new Error('No response');
-
     } catch (error: any) {
-
-      throw new Error(
-        `Gemini check failed: ${error.message}`
-      );
+      throw new Error(`Gemini check failed: ${error.message}`);
     }
   }
 }
