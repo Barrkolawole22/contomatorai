@@ -8,8 +8,9 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import { env, isDevelopment } from './config/env';
-import logger from './config/logger';
+import logger from './config/logger';import scraperRoutes from './routes/scraper.routes';
 import sitesRoutes from './routes/sites.routes';
+
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -185,6 +186,8 @@ if (isDevelopment()) {
     },
   }));
 }
+
+app.use('/api/scraper', scraperRoutes);
 
 // === SESSION CONFIGURATION (MUST BE BEFORE PASSPORT) ===
 if (!env.SESSION_SECRET) {
