@@ -1,4 +1,5 @@
 // backend/src/services/autonomous-pipeline.service.ts
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import PipelineConfig from '../models/pipelineConfig.model';
 import PipelineRun from '../models/pipelineRun.model';
 import rssService from './rss.service';
@@ -8,14 +9,12 @@ import Site from '../models/site.model';
 import Content from '../models/content.model';
 import wordpressService from './wordpress.service';
 import sitemapCrawlerService from './sitemap-crawler.service';
+import { env } from '../config/env';
 import logger from '../config/logger';
 
-// Minimum scraped word count to proceed with generation.
-// Below this threshold the context is too poor to produce quality content.
 const MIN_CONTEXT_WORDS = 100;
-
-// How many minutes apart to stagger article publishing within a single run.
-const PUBLISH_STAGGER_MINUTES = 120; // 2 hours between each article
+const PUBLISH_STAGGER_MINUTES = 120;
+const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
 
 export class AutonomousPipelineService {
   async runPipeline(configId: string): Promise<void> {
@@ -37,14 +36,14 @@ export class AutonomousPipelineService {
     });
     await pipelineRun.save();
 
-    // Track whether gemini-pro quota is exhausted for this run.
-    // ai.service handles its own fallback (gemini-pro -> gemini) on first failure,
-    // but once we know Pro is exhausted we skip straight to Flash for all remaining
-    // articles to avoid wasting 4-6s on a doomed attempt each time.
+    // Extract the plain ObjectId from the populated siteId — critical for
+    // correct query matching on the schedule page
+    const siteObjectId = (config.siteId as any)?._id ?? config.siteId;
+    const siteIdString = siteObjectId?.toString();
+
     let proQuotaExhausted = false;
 
     try {
-      // 1. Fetch RSS items for the configured niche
       const rssItems = await rssService.fetchItems(config.niche, config.maxArticlesPerRun);
 
       if (rssItems.length === 0) {
@@ -59,40 +58,31 @@ export class AutonomousPipelineService {
 
       logger.info(`Pipeline ${configId}: processing ${rssItems.length} RSS item(s) for niche "${config.niche}"`);
 
-      // 2. Fetch internal link suggestions once for the whole run (shared across articles)
-      const siteId = (config.siteId as any)?._id?.toString() || config.siteId?.toString();
-      const internalLinks = await this.fetchInternalLinks(siteId, config.niche);
+      const internalLinks = await this.fetchInternalLinks(siteIdString, config.niche);
 
-      // Track article index for staggered scheduling
       let articleIndex = 0;
 
       for (const item of rssItems) {
         try {
-          // 3. Scrape full article content
-          let scrapedText = item.description || '';
-          let scrapedWordCount = scrapedText.split(/\s+/).filter(Boolean).length;
+          // Build context seed — always include title so Gemini has something
+          // meaningful even when scraping fails entirely
+          let contextSeed = [item.title, item.description].filter(Boolean).join('\n\n');
 
           try {
             const scraped = await scraperService.extract(item.link);
-            scrapedText = scraped.text || item.description;
-            scrapedWordCount = scraped.wordCount;
-            logger.info(`Scraped ${scraped.wordCount} words from ${item.link}`);
+            if (scraped.wordCount >= MIN_CONTEXT_WORDS) {
+              contextSeed = scraped.text;
+              logger.info(`Scraped ${scraped.wordCount} words from ${item.link}`);
+            } else {
+              contextSeed = [item.title, item.description, scraped.text].filter(Boolean).join('\n\n');
+              logger.warn(
+                `Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`
+              );
+            }
           } catch (scrapeErr: any) {
-            logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS description`);
+            logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS seed`);
           }
 
-          // 4. If scraping failed, log it but continue -- gemini-pro with grounding
-          //    will search the web itself during generation, so scraped context
-          //    is enrichment only, not a hard requirement.
-          if (scrapedWordCount < MIN_CONTEXT_WORDS) {
-            logger.warn(
-              `Low scraped context for "${item.title}" (${scrapedWordCount} words) -- proceeding with grounding`
-            );
-            // Use just the RSS title + description as context seed
-            scrapedText = item.description || '';
-          }
-
-          // 5. Deduplication check -- skip if a similar topic was published in the last 30 days
           const isDuplicate = await this.isDuplicateTopic(config.userId.toString(), item.title);
           if (isDuplicate) {
             logger.warn(`Skipping "${item.title}" -- duplicate topic published within last 30 days`);
@@ -104,35 +94,30 @@ export class AutonomousPipelineService {
             continue;
           }
 
-          // 6. Build generation context
           const additionalContext = [
             `Source: ${item.title}`,
             `Published: ${item.pubDate}`,
             `From: ${item.source}`,
             '',
-            scrapedText,
+            contextSeed,
           ].join('\n');
 
           logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars)`);
 
-          // 7. Determine model -- skip Pro immediately if quota was already exhausted this run.
-          //    ai.service has its own fallback but we skip the wasted first attempt entirely.
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
+          const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
 
-          // 8. Generate article
           let articleResult: any;
           try {
             articleResult = await aiService.generateBlogPost(item.title, modelToUse, {
               wordCount: config.targetWordCount,
               additionalContext,
               tone: 'journalistic',
-              internalLinkSuggestions: internalLinks,
-              includeInternalLinks: internalLinks.length > 0,
-              maxInternalLinks: 3,
+              internalLinkSuggestions: trimmedLinks,
+              includeInternalLinks: trimmedLinks.length > 0,
+              maxInternalLinks: trimmedLinks.length,
             });
           } catch (genErr: any) {
-            // If this is the first quota failure this run, mark Pro as exhausted
-            // and retry immediately with Flash for this article.
             if (this.isQuotaError(genErr) && !proQuotaExhausted) {
               proQuotaExhausted = true;
               logger.warn('Pro quota exhausted -- remaining articles this run will use Flash');
@@ -140,30 +125,39 @@ export class AutonomousPipelineService {
                 wordCount: config.targetWordCount,
                 additionalContext,
                 tone: 'journalistic',
-                internalLinkSuggestions: internalLinks,
-                includeInternalLinks: internalLinks.length > 0,
-                maxInternalLinks: 3,
+                internalLinkSuggestions: trimmedLinks,
+                includeInternalLinks: trimmedLinks.length > 0,
+                maxInternalLinks: trimmedLinks.length,
               });
             } else {
               throw genErr;
             }
           }
 
-          // 9. Generate meta description (cheap secondary Flash prompt)
           const metaDescription = await this.generateMetaDescription(
             articleResult.title,
             articleResult.content
           );
 
-          // 10. Save to Content model
+          // Determine schedule date BEFORE the save so status + scheduledPublishDate
+          // are written in a single atomic operation — same pattern as bulkScheduler.
+          // previewWindowMinutes === 0 means publish immediately; anything else = schedule.
+          const staggeredMinutes = config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
+          const scheduledDate =
+            config.previewWindowMinutes > 0
+              ? new Date(Date.now() + staggeredMinutes * 60 * 1000)
+              : undefined;
+
           const content = new Content({
             userId: config.userId,
-            siteId: config.siteId,
+            siteId: siteObjectId,                             // plain ObjectId, not populated doc
             title: articleResult.title,
             content: articleResult.content,
             excerpt: metaDescription,
             keyword: item.title,
-            status: 'draft',
+            status: scheduledDate ? 'scheduled' : 'draft',   // single authoritative write
+            scheduledPublishDate: scheduledDate,
+            timezone: 'UTC',
             wordCount: articleResult.wordCount,
             readingTime: Math.ceil(articleResult.wordCount / 200),
             aiGenerated: true,
@@ -173,10 +167,13 @@ export class AutonomousPipelineService {
           pipelineRun.results.push({ topic: item.title, contentId: content._id as any, status: 'generated' });
           pipelineRun.articlesGenerated += 1;
 
-          // 11. Publish immediately or stagger-schedule
-          if (config.previewWindowMinutes === 0) {
-            const site = config.siteId as any;
-            const fullSite = await Site.findById(site._id || site).select('+applicationPassword');
+          if (scheduledDate) {
+            logger.info(
+              `Content ${content._id} scheduled -- publishes at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`
+            );
+          } else {
+            // previewWindowMinutes === 0: publish immediately to WordPress
+            const fullSite = await Site.findById(siteObjectId).select('+applicationPassword');
             if (fullSite) {
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
@@ -193,18 +190,6 @@ export class AutonomousPipelineService {
                 throw new Error(publishResult.error);
               }
             }
-          } else {
-            // Stagger publish times: first article after previewWindow, then +2h each
-            const staggeredMinutes =
-              config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
-            const scheduledDate = new Date(Date.now() + staggeredMinutes * 60 * 1000);
-
-            content.status = 'scheduled';
-            content.scheduledPublishDate = scheduledDate;
-            await content.save();
-            logger.info(
-              `Content ${content._id} scheduled -- publishes at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`
-            );
           }
 
           articleIndex++;
@@ -230,14 +215,9 @@ export class AutonomousPipelineService {
     );
   }
 
-  /**
-   * Check if a very similar topic/keyword was published in the last 30 days
-   * to avoid near-duplicate content on the site.
-   */
   private async isDuplicateTopic(userId: string, topic: string): Promise<boolean> {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
       const keywords = topic
         .toLowerCase()
         .replace(/[^a-z\s]/g, '')
@@ -273,10 +253,6 @@ export class AutonomousPipelineService {
     }
   }
 
-  /**
-   * Fetch internal link suggestions from the sitemap for a given site + niche.
-   * Returns empty array gracefully if sitemap has no data yet.
-   */
   private async fetchInternalLinks(siteId: string, niche: string): Promise<any[]> {
     try {
       if (!siteId) return [];
@@ -291,41 +267,36 @@ export class AutonomousPipelineService {
   }
 
   /**
-   * Generate a concise 155-character meta description using the Flash model.
-   * Always uses Flash -- fast, cheap, no need for Pro here.
+   * Direct Flash call — no full article pipeline.
+   * maxOutputTokens: 80 caps the response to ~1 sentence.
    */
   private async generateMetaDescription(title: string, content: string): Promise<string> {
     try {
+      const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: { maxOutputTokens: 80, temperature: 0.3 },
+      });
+
       const plainText = content
         .replace(/<[^>]*>/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
         .substring(0, 500);
 
-      const prompt = `Write a compelling SEO meta description for this article in exactly 1 sentence, maximum 155 characters. Do not use quotes. Output only the description, nothing else.\n\nTitle: ${title}\nContent excerpt: ${plainText}`;
+      const prompt = `Write a compelling SEO meta description in exactly 1 sentence, maximum 155 characters. Output only the description, nothing else.\n\nTitle: ${title}\nContent: ${plainText}`;
 
-      const result = await aiService.generateBlogPost(prompt, 'gemini', {
-        wordCount: 50,
-        additionalContext: '',
-      });
-
-      const meta = result.content
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .substring(0, 155);
-
+      const result = await model.generateContent(prompt);
+      const meta = result.response.text().trim().substring(0, 155);
       logger.info(`Generated meta description: ${meta.substring(0, 60)}...`);
       return meta;
     } catch (err: any) {
-      logger.warn(`Meta description generation failed: ${err.message} -- using empty string`);
+      logger.warn(`Meta description generation failed: ${err.message}`);
       return '';
     }
   }
 
-  /**
-   * Detect whether an error is a Gemini quota/rate-limit error.
-   */
   private isQuotaError(err: any): boolean {
     const msg = err?.message || '';
     return (
