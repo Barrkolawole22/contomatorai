@@ -29,7 +29,7 @@ const pipelineRunSchema = new Schema<IPipelineRun>({
   results: [{
     topic: String,
     contentId: { type: Schema.Types.ObjectId, ref: 'Content' },
-    status: { type: String, enum: ['generated', 'published', 'failed'] },
+    status: { type: String, enum: ['generated', 'published', 'failed', 'skipped'] },
     error: String
   }]
 }, { timestamps: true });
