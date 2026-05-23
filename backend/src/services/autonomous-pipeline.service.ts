@@ -81,17 +81,15 @@ export class AutonomousPipelineService {
             logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS description`);
           }
 
-          // 4. Skip if context is too thin -- bad context = bad content
+          // 4. If scraping failed, log it but continue -- gemini-pro with grounding
+          //    will search the web itself during generation, so scraped context
+          //    is enrichment only, not a hard requirement.
           if (scrapedWordCount < MIN_CONTEXT_WORDS) {
             logger.warn(
-              `Skipping "${item.title}" -- insufficient context (${scrapedWordCount} words, minimum ${MIN_CONTEXT_WORDS})`
+              `Low scraped context for "${item.title}" (${scrapedWordCount} words) -- proceeding with grounding`
             );
-            pipelineRun.results.push({
-              topic: item.title,
-              status: 'skipped',
-              error: `Insufficient context: ${scrapedWordCount} words scraped`,
-            });
-            continue;
+            // Use just the RSS title + description as context seed
+            scrapedText = item.description || '';
           }
 
           // 5. Deduplication check -- skip if a similar topic was published in the last 30 days
