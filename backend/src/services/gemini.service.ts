@@ -1,7 +1,7 @@
 // backend/src/services/gemini.service.ts
 // UPDATED VERSION — proper retry-after handling + meta description support
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, Tool } from '@google/generative-ai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
@@ -102,7 +102,7 @@ export class GeminiService {
           targetWordCount,
           attempt,
           modelString,
-          enableGrounding
+          enableGrounding ?? false
         );
 
         // Internal link validation
@@ -126,8 +126,6 @@ export class GeminiService {
       } catch (error: any) {
         lastError = error;
 
-        // Extract the retry delay Gemini tells us to use, then honour it.
-        // The delay is embedded in the error message JSON as "retryDelay":"Xs"
         const retryDelayMs = this.extractRetryDelayMs(error);
 
         if (retryDelayMs > 0 && attempt < maxRetries) {
@@ -148,23 +146,16 @@ export class GeminiService {
     throw lastError || new Error('Gemini content generation failed after retries');
   }
 
-  /**
-   * Parse the retry delay from a Gemini 429 error message.
-   * Gemini embeds it as `"retryDelay":"Xs"` in the error JSON body.
-   * Falls back to 0 if not found, letting the caller decide what to do.
-   */
   private extractRetryDelayMs(error: any): number {
     try {
       const msg: string = error?.message || '';
 
-      // Try to find retryDelay in the JSON blob inside the error message
       const retryDelayMatch = msg.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
       if (retryDelayMatch) {
         const seconds = parseFloat(retryDelayMatch[1]);
         return Math.ceil(seconds * 1000);
       }
 
-      // Fallback: try the standard HTTP Retry-After header (if axios surfaces it)
       const retryAfter = error?.response?.headers?.['retry-after'];
       if (retryAfter) {
         return parseInt(retryAfter, 10) * 1000;
@@ -190,13 +181,16 @@ export class GeminiService {
       maxOutputTokens: 8192,
     };
 
-    const tools = enableGrounding ? [{ googleSearchRetrieval: {} }] : undefined;
+    // Cast to Tool[] to satisfy SDK's strict union type while preserving runtime shape
+    const tools: Tool[] | undefined = enableGrounding
+      ? ([{ googleSearch: {} }] as unknown as Tool[])
+      : undefined;
 
     const model = this.genAI!.getGenerativeModel({
       model: modelString,
       generationConfig,
       systemInstruction: promptBuilder.buildSystemMessage(),
-      tools,
+      ...(tools ? { tools } : {}),
     });
 
     const prompt = promptBuilder.buildMasterPrompt(keyword, options, attempt);
