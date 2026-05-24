@@ -25,7 +25,8 @@ const MAX_TAGS = 10;
 async function aiRelevanceCheck(
   title: string,
   description: string,
-  relevanceTopics: string[]
+  relevanceTopics: string[],
+  niches: string[]
 ): Promise<{ relevant: boolean; reason: string }> {
   try {
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
@@ -35,14 +36,19 @@ async function aiRelevanceCheck(
       generationConfig: { maxOutputTokens: 10, temperature: 0 },
     });
 
-    const prompt = `You are a content relevance filter.
+    const prompt = `You are a content relevance filter for a niche website.
 
-Topics this pipeline covers: ${relevanceTopics.join(', ')}
+Broad topics this pipeline covers: ${relevanceTopics.join(', ')}
+Specific niche keywords for this site: ${niches.join(', ')}
+
+An article is relevant if it touches on any of the broad topics, any of the specific niche
+keywords, or is clearly about the same subject area as those keywords. Be inclusive rather
+than strict — if there is a reasonable connection, answer YES.
 
 Article title: ${title}
 Article description: ${description || '(none)'}
 
-Is this article relevant to any of the listed topics?
+Is this article relevant?
 Reply with only YES or NO — nothing else.`;
 
     const result = await model.generateContent(prompt);
@@ -151,14 +157,18 @@ export class AutonomousPipelineService {
       for (const item of rssItems) {
         try {
           // ── AI RELEVANCE GATE ─────────────────────────────────────────────
-          if (relevanceTopics.length > 0) {
-            const check = await aiRelevanceCheck(item.title, item.description, relevanceTopics);
+          const meaningfulNiches = niches.filter(n => n.length >= 4);
+
+          if (relevanceTopics.length > 0 && meaningfulNiches.length > 0) {
+            const check = await aiRelevanceCheck(item.title, item.description, relevanceTopics, meaningfulNiches);
             if (!check.relevant) {
               logger.warn(`AI gate rejected "${item.title}": ${check.reason}`);
               pipelineRun.results.push({ topic: item.title, status: 'skipped', error: check.reason });
               continue;
             }
             logger.info(`AI gate approved "${item.title}"`);
+          } else if (relevanceTopics.length > 0 && meaningfulNiches.length === 0) {
+            logger.warn(`AI gate skipped for "${item.title}" -- no meaningful niche keywords to evaluate against`);
           }
           // ─────────────────────────────────────────────────────────────────
 
