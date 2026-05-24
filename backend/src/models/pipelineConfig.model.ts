@@ -7,6 +7,7 @@ export interface IPipelineConfig extends Document {
   isActive: boolean;
   schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
   niches: string[];
+  relevanceTopics: string[];   // broad categories for AI relevance gate e.g. ["law", "crime", "finance"]
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -26,6 +27,7 @@ const pipelineConfigSchema = new Schema<IPipelineConfig>({
     required: true,
   },
   niches: { type: [String], required: true },
+  relevanceTopics: { type: [String], default: [] },
   targetWordCount: { type: Number, default: 1500 },
   aiModel: { type: String, enum: ['gemini', 'gemini-pro', 'gpt4o', 'claude'], default: 'gemini' },
   previewWindowMinutes: { type: Number, default: 60 },
