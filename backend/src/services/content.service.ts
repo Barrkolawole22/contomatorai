@@ -40,24 +40,23 @@ export class ContentService {
 
       const topic = p.keywords?.[0] || p.keyword || 'blog post';
 
-      // ── RAG: retrieve knowledgebase context if doc IDs provided ──
+      // ── Knowledgebase: inject full doc text if doc IDs provided ──
       let knowledgeContext = '';
       const docIds: string[] = p.selectedDocIds || p.docIds || [];
       if (docIds.length > 0) {
         try {
-          logger.info(`Retrieving RAG context for topic "${topic}" from ${docIds.length} doc(s)`);
-          knowledgeContext = await knowledgebaseService.retrieveContext(userId, docIds, topic);
+          logger.info(`Retrieving knowledgebase context from ${docIds.length} doc(s)`);
+          knowledgeContext = await knowledgebaseService.retrieveContext(userId, docIds);
           if (knowledgeContext) {
-            logger.info(`RAG context retrieved: ${knowledgeContext.length} characters`);
+            logger.info(`Knowledgebase context retrieved: ${knowledgeContext.length} characters`);
           } else {
-            logger.warn('RAG retrieval returned empty context');
+            logger.warn('Knowledgebase retrieval returned empty context');
           }
         } catch (err: any) {
-          logger.warn(`RAG retrieval failed (continuing without context): ${err.message}`);
+          logger.warn(`Knowledgebase retrieval failed (continuing without context): ${err.message}`);
         }
       }
 
-      // Merge RAG context with any additional context from frontend
       const mergedContext = [knowledgeContext, p.additionalContext]
         .filter(Boolean)
         .join('\n\n---\n\n');

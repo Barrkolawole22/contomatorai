@@ -175,17 +175,13 @@ export class BulkSchedulerService {
 
           if (entry.docIds && entry.docIds.length > 0) {
             try {
-              logger.info(`RAG: retrieving context for "${entry.keyword}" from ${entry.docIds.length} doc(s)`);
-              const knowledgeContext = await knowledgebaseService.retrieveContext(
-                userId,
-                entry.docIds,
-                entry.topic || entry.keyword
-              );
-              logger.info(`RAG: ${knowledgeContext.length} chars retrieved for "${entry.keyword}"`);
+              logger.info(`Knowledgebase: retrieving context for "${entry.keyword}" from ${entry.docIds.length} doc(s)`);
+              const knowledgeContext = await knowledgebaseService.retrieveContext(userId, entry.docIds);
+              logger.info(`Knowledgebase: ${knowledgeContext.length} chars retrieved for "${entry.keyword}"`);
               const mergedContext = [knowledgeContext, entry.additionalContext].filter(Boolean).join('\n\n---\n\n');
               generationOptions.additionalContext = mergedContext;
             } catch (ragError: any) {
-              logger.warn(`RAG retrieval failed for "${entry.keyword}": ${ragError.message}. Continuing without knowledgebase context.`);
+              logger.warn(`Knowledgebase retrieval failed for "${entry.keyword}": ${ragError.message}. Continuing without context.`);
             }
           }
 
@@ -197,25 +193,19 @@ export class BulkSchedulerService {
             generationOptions.extraInstructions = instructions + '\n\n' + (generationOptions.extraInstructions || '');
           }
 
-          // ========================================================
-          // ✅ FIX: Check if we need to schedule AI generation
-          // ========================================================
           const now = new Date();
           let isFutureScheduled = false;
           let generateAt: Date | undefined = undefined;
 
           if (entry.scheduledDate) {
             const scheduledDate = new Date(entry.scheduledDate);
-            generateAt = new Date(scheduledDate.getTime() - 15 * 60000); // 15 mins before
-            
-            // If 15 mins before is already in the past, just generate it now
+            generateAt = new Date(scheduledDate.getTime() - 15 * 60000);
             if (generateAt > now) {
               isFutureScheduled = true;
             }
           }
 
           if (isFutureScheduled) {
-            // Save Shell Article to DB instantly
             const content = new Content({
               userId,
               siteId: options.siteId,
@@ -223,7 +213,7 @@ export class BulkSchedulerService {
               content: '',
               keyword: entry.keyword,
               keywords: [entry.keyword],
-              status: 'pending_generation', // Triggers Phase 1 of cron
+              status: 'pending_generation',
               type: 'article',
               tone: options.tone || 'professional',
               wordCount: options.wordCount || 1500,
@@ -240,7 +230,6 @@ export class BulkSchedulerService {
                 includeHeadings: true,
                 includeIntroduction: options.includeIntroduction !== false,
                 includeConclusion: options.includeConclusion !== false,
-                // Serialize options for the cron job to read later
                 extraInstructions: JSON.stringify({ model: selectedModel, ...generationOptions })
               }
             });
@@ -259,12 +248,8 @@ export class BulkSchedulerService {
             });
 
             logger.info(`⏳ Reserved Shell: "${entry.keyword}" scheduled to generate at ${generateAt}`);
-            continue; // Skip immediate AI generation and move to next article!
+            continue;
           }
-
-          // ========================================================
-          // IMMEDIATE GENERATION (If no schedule or schedule is past)
-          // ========================================================
 
           const generationKeyword = entry.topic || entry.keyword;
           const generatedContent = await aiService.generateBlogPost(generationKeyword, selectedModel, generationOptions);

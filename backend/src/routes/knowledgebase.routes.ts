@@ -13,9 +13,6 @@ const router = express.Router();
 
 const storage = multer.diskStorage({
   destination: (req: any, _file, cb) => {
-    // req.user is available because authMiddleware runs before multer
-    // (see router.use(authMiddleware) below — but multer is declared here
-    //  at module level so we handle missing user defensively)
     const userId: string = req.user?.id || 'unknown';
     const dir = path.join(__dirname, '../../uploads/knowledgebase', userId);
     fs.mkdirSync(dir, { recursive: true });
@@ -23,7 +20,6 @@ const storage = multer.diskStorage({
   },
   filename: (_req, file, cb) => {
     const unique = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    // Sanitise original filename: replace spaces with underscores
     const safe = file.originalname.replace(/\s+/g, '_');
     cb(null, `${unique}-${safe}`);
   },
@@ -57,7 +53,6 @@ router.use(authMiddleware);
 
 /**
  * POST /api/knowledgebase/upload
- * Multipart upload — field name: document
  */
 router.post(
   '/upload',
@@ -92,8 +87,7 @@ router.post(
 
 /**
  * POST /api/knowledgebase/search
- * Test retrieval for a given topic across selected docs.
- * Declared BEFORE /:id so Express does not treat "search" as an ID.
+ * Preview the full text context that will be injected for selected docs.
  */
 router.post('/search', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -103,18 +97,14 @@ router.post('/search', async (req: AuthenticatedRequest, res: Response) => {
       return;
     }
 
-    const { docIds, topic } = req.body as { docIds?: string[]; topic?: string };
+    const { docIds } = req.body as { docIds?: string[] };
 
     if (!docIds || !Array.isArray(docIds) || docIds.length === 0) {
       res.status(400).json({ success: false, message: 'docIds array is required' });
       return;
     }
-    if (!topic || typeof topic !== 'string') {
-      res.status(400).json({ success: false, message: 'topic is required' });
-      return;
-    }
 
-    const context = await knowledgebaseService.retrieveContext(userId, docIds, topic);
+    const context = await knowledgebaseService.retrieveContext(userId, docIds);
     res.json({ success: true, data: { context, charCount: context.length } });
   } catch (error: any) {
     logger.error('Knowledgebase search error:', error);
@@ -124,7 +114,6 @@ router.post('/search', async (req: AuthenticatedRequest, res: Response) => {
 
 /**
  * GET /api/knowledgebase
- * List all documents for the authenticated user.
  */
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -144,7 +133,6 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
 
 /**
  * GET /api/knowledgebase/:id
- * Single document metadata (no chunks).
  */
 router.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
