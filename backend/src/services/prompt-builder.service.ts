@@ -31,6 +31,11 @@ interface PromptOptions {
   internalLinkDensity?: number;
   includeExternalLinks?: boolean;
   extraInstructions?: string;
+
+  // News-specific fields
+  sourceUrl?: string;
+  sourceName?: string;
+  articleImages?: Array<{ url: string; alt: string }>;
 }
 
 export class PromptBuilderService {
@@ -41,230 +46,269 @@ export class PromptBuilderService {
     attempt: number = 1
   ): string {
 
-    const tone = options.tone || 'professional';
-    const audience = options.targetAudience || 'general audience';
-    const style = options.writingStyle || 'conversational';
-    const targetWordCount = options.wordCount || 1500;
+    const tone = options.tone || 'journalistic';
+    const audience = options.targetAudience || 'general readers';
+    const targetWordCount = options.wordCount || 1200;
 
     let prompt = '';
 
     // ============================================================
-    // OPENING + SOURCE GROUNDING
+    // ROLE + TASK
     // ============================================================
 
-    prompt += `Write an article about "${keyword}" for ${audience}.\n\n`;
+    prompt += `You are a news reporter writing an original news article about: "${keyword}"
+
+This is a news article, not a blog post. Write it the way a professional journalist would for a reputable outlet.
+
+`;
+
+    // ============================================================
+    // SOURCE MATERIAL
+    // ============================================================
 
     if (options.additionalContext) {
-      prompt += `SOURCE MATERIAL:
-
-Use this as your primary reference. Stick to what it says -- do not invent facts, quotes, or statistics.
+      prompt += `SOURCE MATERIAL (primary reference -- base all facts on this):
 
 ---
 ${options.additionalContext}
 ---
 
+Extract and use: specific names, dates, times, locations, figures, quotes, and events from this material.
+Do NOT invent facts. If the source is thin, rely on grounding to fill in verified details.
+
 `;
     }
 
     // ============================================================
-    // TARGET LENGTH + PADDING RULES
+    // WORD COUNT + NO PADDING
     // ============================================================
 
-    prompt += `TARGET LENGTH: Approximately ${targetWordCount} words.
+    prompt += `TARGET LENGTH: ${targetWordCount} words.
 
-WORD COUNT RULES -- VERY IMPORTANT:
-- Every sentence must earn its place. If it does not add new information, cut it.
-- Do NOT repeat the same idea in different words just to reach the word count.
-- Do NOT add filler sentences like "This is an important topic" or "As we can see..."
-- Do NOT restate what you just said at the end of each section.
-- If you run out of genuinely useful things to say before hitting the word count, end the article. A shorter, tighter article is always better than a padded one.
+Every sentence must add new information. Do not restate what you just said. Do not pad to reach word count. A tight 800-word article beats a bloated 1200-word one.
 
 `;
 
     // ============================================================
-    // RETRY ATTEMPT HANDLING
+    // RETRY
     // ============================================================
 
     if (attempt > 1) {
-      prompt += `RETRY NOTE: Previous attempt had quality issues. Write complete sections, avoid placeholders, finish with a proper conclusion.
+      prompt += `RETRY: Previous attempt had quality issues. Write complete sections, no placeholders, proper ending.\n\n`;
+    }
+
+    // ============================================================
+    // NEWS WRITING STYLE
+    // ============================================================
+
+    prompt += `NEWS WRITING RULES:
+
+1. LEAD PARAGRAPH (first paragraph, 2-3 sentences):
+   - Answer: Who, What, When, Where, Why
+   - Use specific details: real names, actual dates or timeframes ("on Tuesday", "last week", "as of May 2025"), specific locations
+   - This is the most important paragraph -- make it count
+
+2. INVERTED PYRAMID structure:
+   - Most important facts first
+   - Supporting details next
+   - Background and context last
+
+3. NAMES AND SPECIFICS:
+   - Always use full names on first mention, then last name only
+   - Include job titles, organisation names, locations
+   - Reference specific dates, amounts, statistics from the source
+   - If the source mentions "the agency", name the agency
+
+4. QUOTES AND ATTRIBUTION:
+   - If the source contains quotes, use them with proper attribution: John Smith said, "..."
+   - If no direct quotes, paraphrase with attribution: According to the report, ...
+   - Do not fabricate quotes
+
+5. TIME REFERENCES:
+   - Use specific time references from the source: "on Friday", "during a press briefing on Wednesday", "as announced in March 2025"
+   - If date is not in the source, use relative terms: "recently", "this week"
+
+6. TONE:
+   - Neutral, factual, no opinion in the main body
+   - Short sentences. Active voice preferred.
+   - No filler words. No fluff.
+
+`;
+
+    // ============================================================
+    // HEADLINE
+    // ============================================================
+
+    prompt += `HEADLINE (H1):
+
+Write a headline that makes someone want to click and read. It should be:
+- Specific -- use real names, numbers, or locations from the story
+- Curious or slightly surprising -- hint at something unexpected
+- Under 12 words
+- No colons splitting it into two clauses
+- No buzzwords (no "navigating", "comprehensive", "exploring", "transformative")
+- Written like a newspaper front page, not a blog post
+
+GOOD examples:
+- "Sex Offender Charged Again for Hiding Where He Works"
+- "Tinubu Did Not Plan to Rename Nigeria. Here Is What Actually Happened."
+- "EFCC Arrests 47 in Lagos as Online Fraud Sweep Expands Nationwide"
+- "Court Orders Meta to Delete Millions of User Records Collected Without Consent"
+
+BAD examples:
+- "Offender Fails To Update Job Status" (too flat, zero curiosity)
+- "Understanding the Legal Landscape of Sex Offender Registration" (buzzword, boring)
+- "Important Update: What You Need to Know About..." (vague clickbait)
+
+`;
+
+    // ============================================================
+    // ARTICLE STRUCTURE
+    // ============================================================
+
+    prompt += `ARTICLE STRUCTURE:
+
+Start with <h1> (the headline). Then go straight into the lead paragraph -- no subtitle, no repeated title.
+
+SECTIONS:
+- 4-6 sections with plain H2 headings
+- Each section covers ONE idea
+- H2 headings: short, plain, descriptive (same rules as H1 but can be slightly shorter)
+- No summary sentence at the end of each section (that is padding)
+
+LEGAL COMMENTARY (subtle, one section):
+Include one section that briefly addresses the legal dimension -- not a lecture, more like a comment. Example:
+- What law applies here
+- What the penalties or precedents are
+- What legal experts or the law generally says about this type of situation
+- Keep it factual and brief -- 1-2 paragraphs only
+
+`;
+
+    // ============================================================
+    // IMAGES -- inject into article body
+    // ============================================================
+
+    if (options.articleImages && options.articleImages.length > 0) {
+      prompt += `IMAGES:
+
+You have ${options.articleImages.length} image(s) from the source article. Place them naturally inside the article body using this exact HTML format:
+
+<figure>
+  <img src="IMAGE_URL" alt="ALT_TEXT" style="max-width:100%;height:auto;" />
+  <figcaption>BRIEF_CAPTION</figcaption>
+</figure>
+
+Place the first image after the lead paragraph. Place additional images (if any) in the middle of the article where they are relevant to the section being discussed.
+
+Available images:
+${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="${img.alt || keyword}"`).join('\n')}
+
+Do NOT skip the images. They must appear in the article HTML.
 
 `;
     }
 
     // ============================================================
-    // WRITING STYLE -- PLAIN EVERYDAY LANGUAGE
+    // MANDATORY LINK STRUCTURE
     // ============================================================
 
-    prompt += `WRITING STYLE:
+    prompt += `MANDATORY LINKS -- YOU MUST INCLUDE ALL OF THESE:
 
-Write the way a smart person explains something to a friend -- clear, direct, no jargon unless necessary.
-
-Rules:
-- Use short sentences. Break up long ones.
-- Use everyday words. Say "use" not "utilize". Say "help" not "facilitate".
-- If you need to explain a technical term, do it in one plain sentence immediately after.
-- No corporate speak. No academic padding. No motivational filler.
-- Vary your sentence length -- mix short punchy sentences with longer explanatory ones.
-
-Tone: ${tone}
-Audience: ${this.getAudienceDescription(audience)}
+The article must contain at least 5 links total. Here is how to include each:
 
 `;
 
-    // ============================================================
-    // HEADLINE RULES
-    // ============================================================
+    // Link 1: Primary source
+    if (options.sourceUrl) {
+      const sourceName = options.sourceName || 'the original report';
+      prompt += `LINK 1 -- PRIMARY SOURCE (required):
+Link to the original article where this news was reported.
+URL: ${options.sourceUrl}
+How to use it: Attribute the source naturally in a sentence, for example:
+  "According to ${sourceName}, the incident occurred..."
+  "${sourceName} first reported that..."
+  "As ${sourceName} reported, ..."
+Format: <a href="${options.sourceUrl}" target="_blank" rel="noopener noreferrer">anchor text</a>
 
-    prompt += `HEADLINE (H1 TITLE) RULES:
+`;
+    } else {
+      prompt += `LINK 1 -- PRIMARY SOURCE (required):
+Attribute the original source in a sentence. Link to the original news outlet that reported this story.
+Use natural phrasing like "According to [outlet name]..." or "[outlet] reported that..."
+Format: <a href="SOURCE_URL" target="_blank" rel="noopener noreferrer">outlet name</a>
 
-- Use the source headline as your starting point
-- Keep it under 12 words
-- No colons, no semicolons, no em-dashes splitting two clauses
-- No buzzwords: avoid "navigating", "comprehensive", "ultimate", "exploring", "delving", "transformative", "landscape", "realm", "journey", "unveiling"
-- Write it like a newspaper headline, not a blog post title
+`;
+    }
 
-GOOD: "Tinubu Does Not Plan to Rename Nigeria or Abolish Sharia Law"
-GOOD: "Court Rules Against Meta in User Data Privacy Case"
-BAD: "Navigating the Misinformation Maze: The Truth About Tinubu's Plans" (colon + buzzword)
-BAD: "Understanding the Complex Landscape of Nigerian Legal Recognition" (vague + buzzwords)
+    // Link 2: Authority website
+    prompt += `LINK 2 -- AUTHORITY AGENCY WEBSITE (required):
+Link to a relevant official government or law enforcement agency website.
+Examples depending on topic:
+- Nigeria: EFCC (efcc.gov.ng), NDLEA (ndlea.gov.ng), Nigerian Judiciary (judiciary.gov.ng), CBN (cbn.gov.ng)
+- USA: FBI (fbi.gov), DOJ (justice.gov), FTC (ftc.gov), SEC (sec.gov), relevant .gov agency
+- UK: Crown Prosecution Service (cps.gov.uk), National Crime Agency (nationalcrimeagency.gov.uk)
+Choose the agency most relevant to the story topic.
+Use it naturally: "The [Agency Name] defines this as..." or "Under [Agency] guidelines..."
+Format: <a href="AGENCY_URL" target="_blank" rel="noopener noreferrer">Agency Name</a>
 
 `;
 
-    // ============================================================
-    // CONTENT STRUCTURE
-    // ============================================================
+    // Links 3-4: Internal links from sitemap
+    if (options.internalLinkSuggestions && options.internalLinkSuggestions.length > 0) {
+      const maxInternal = Math.min(options.internalLinkSuggestions.length, options.maxInternalLinks || 3);
+      prompt += `LINKS 3-${3 + maxInternal - 1} -- INTERNAL LINKS TO OUR PREVIOUS ARTICLES (required):
+Link to these previously published articles on our site where they are relevant to what you are writing:
 
-    prompt += `CONTENT STRUCTURE:
+${options.internalLinkSuggestions.slice(0, maxInternal).map((link, i) =>
+  `${i + 3}. "${link.title}"
+   URL: ${link.url}
+   ${link.description ? `Context: ${link.description}` : ''}`
+).join('\n\n')}
 
-Start with <h1> (the headline). Then go straight into the article -- no repeated title, no subtitle.
-
-OPENING (first 2-3 paragraphs):
-- Start with the most important or interesting fact from the source
-- Tell readers what happened and why it matters
-- Do NOT start with "In today's world", "It is important to note", or any similar filler
-
-MAIN BODY:
-- 4-6 sections with H2 headings
-- Each section covers ONE idea -- do not mix topics
-- H2 headings should be plain and descriptive, same rules as H1
-- Each paragraph makes exactly one point, then moves on
-- No summary sentences at the end of each section (that's padding)
-
-`;
-
-    // ============================================================
-    // INTERNAL LINKS
-    // ============================================================
-
-    if (
-      options.includeInternalLinks &&
-      options.internalLinkSuggestions &&
-      options.internalLinkSuggestions.length > 0
-    ) {
-      const maxLinks = options.maxInternalLinks || 3;
-
-      prompt += `INTERNAL LINKS:
-
-Add up to ${maxLinks} internal links where they genuinely help the reader learn more.
-
-AVAILABLE LINKS:
-${options.internalLinkSuggestions.map((link, i) =>
-  `${i + 1}. "${link.title}" -- ${link.url}`
-).join('\n')}
-
+Use them naturally mid-sentence where the topic connects. Example:
+"This follows a pattern seen in earlier cases, as we reported in our coverage of [anchor text linking to previous article]."
 Format: <a href="URL">descriptive anchor text</a>
-Do not force links in -- only add them where they fit naturally.
+
+`;
+    } else {
+      prompt += `LINKS 3-4 -- INTERNAL LINKS (required):
+Link to 2 relevant previously published articles. Use natural anchor text and place links where the topic connects.
+Format: <a href="/relevant-article-url">descriptive anchor text</a>
 
 `;
     }
 
-    // ============================================================
-    // EXTERNAL LINKS -- ALWAYS ON FOR PIPELINE ARTICLES
-    // ============================================================
-
-    prompt += `EXTERNAL LINKS:
-
-Add 2-3 external links to authoritative sources where relevant.
-
-Good sources: Wikipedia, government sites (.gov), official organization websites, major news publications.
-
+    // Link 5: Additional external authority
+    prompt += `LINK 5 -- ADDITIONAL EXTERNAL REFERENCE (required):
+Include one more external link to a highly authoritative source relevant to the topic.
+Good choices: Wikipedia for background definitions, academic institutions, major news organisations (Reuters, BBC, AP), WHO, UN, relevant international bodies.
+Only link to URLs you are confident actually exist. Do NOT invent URLs.
 Format: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
 
-Rules:
-- Only link to URLs you are highly confident actually exist
-- Do NOT invent URLs or guess at web addresses
-- If unsure, skip the link rather than fabricating one
-- Use the link naturally in a sentence -- do not add a "References" section at the end
-
 `;
-
-    // ============================================================
-    // OPTIONAL FEATURES
-    // ============================================================
-
-    if (options.includeStatistics) {
-      prompt += `STATISTICS: Include relevant statistics only if the source material supports them. Never invent numbers.
-
-`;
-    }
-
-    if (options.includeExamples) {
-      prompt += `EXAMPLES: Include real examples grounded in the source material where they help explain a point.
-
-`;
-    }
-
-    if (options.includeFAQ) {
-      prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would ask, with direct plain-language answers.
-
-`;
-    }
 
     // ============================================================
     // CONCLUSION
     // ============================================================
 
     prompt += `CONCLUSION:
-- 2-3 paragraphs maximum
-- Summarize only what has not already been said
-- End with a clear takeaway or implication -- not a motivational statement
-- Do NOT say "In conclusion" or "To summarize"
+2-3 paragraphs. Summarise only what has not already been said. End with what happens next -- what readers should watch for, what is pending, or what the broader implication is.
+Do NOT say "In conclusion" or "To summarise".
 
 `;
-
-    if (options.callToAction) {
-      prompt += `Include this call-to-action naturally: ${options.callToAction}\n\n`;
-    }
 
     // ============================================================
     // HTML FORMATTING
     // ============================================================
 
     prompt += `HTML FORMATTING:
-
-- <h1> for the main title (ONE only -- do not repeat the title anywhere else in the article)
-- <h2> for sections
-- <h3> for subsections if needed
+- <h1> for the headline (ONE only -- never repeat the title in the article body)
+- <h2> for section headings
 - <p> for paragraphs
-- <ul>/<ol>/<li> for lists
-- <a href="URL">text</a> for links
-- No markdown
-
-`;
-
-    // ============================================================
-    // AVOID LIST
-    // ============================================================
-
-    prompt += `NEVER DO THESE:
-- Repeat the title as the first line after the H1
-- Start the article body with the headline again in any form
-- Use "In today's fast-paced world" or any similar opener
-- Write "It is worth noting that..." or "It is important to understand..."
-- End sections with a sentence that just restates what the section said
-- Invent quotes, statistics, studies, or URLs
-- Use the word "delve", "realm", "landscape", "crucial", "vital", "game-changing"
-- Pad sentences to reach word count
+- <figure><img .../><figcaption>...</figcaption></figure> for images
+- <a href="...">text</a> for links
+- No markdown. No bullet lists unless genuinely listing items.
 
 `;
 
@@ -272,7 +316,20 @@ Rules:
     // SEO
     // ============================================================
 
-    prompt += `SEO: ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)}
+    prompt += `SEO: Mention "${keyword}" naturally in the headline, first paragraph, and 2-3 times in the body. Do not stuff it.\n\n`;
+
+    // ============================================================
+    // NEVER DO LIST
+    // ============================================================
+
+    prompt += `NEVER DO THESE:
+- Repeat the H1 title anywhere in the article body
+- Start with "In today's world" or any filler opener
+- Use: delve, realm, landscape, crucial, vital, game-changing, transformative, unveiling, empowering, comprehensive
+- Invent quotes, statistics, names, or URLs
+- Pad sentences to reach word count
+- Skip the images if they were provided
+- Skip any of the 5 mandatory links
 
 `;
 
@@ -280,146 +337,94 @@ Rules:
     // CUSTOM
     // ============================================================
 
-    if (options.customPrompt) {
-      prompt += `ADDITIONAL REQUIREMENTS:\n${options.customPrompt}\n\n`;
-    }
-
-    if (options.extraInstructions) {
-      prompt += `EXTRA GUIDELINES:\n${options.extraInstructions}\n\n`;
-    }
+    if (options.customPrompt) prompt += `ADDITIONAL REQUIREMENTS:\n${options.customPrompt}\n\n`;
+    if (options.extraInstructions) prompt += `EXTRA GUIDELINES:\n${options.extraInstructions}\n\n`;
 
     // ============================================================
     // FINAL
     // ============================================================
 
-    prompt += `Now write the article. Start with <h1>. Go straight into the content after the title -- no repeated headline, no subtitle.
-`;
+    prompt += `Now write the complete news article. Start with <h1>. Include all 5+ links and all provided images.\n`;
 
     return prompt;
   }
 
   buildSystemMessage(): string {
-    return `You are a journalist and editor who writes clear, direct articles for general readers.
+    return `You are a professional news journalist writing factual, clear, engaging articles for a general readership.
 
 YOUR RULES:
 
-1. PLAIN LANGUAGE
-Write the way a smart person explains something to a friend.
-Short sentences. Everyday words. No jargon without explanation.
-Say "use" not "utilize". Say "help" not "facilitate". Say "now" not "at this juncture".
+1. NEWS FIRST
+Lead with the most important fact. Use real names, dates, amounts, and locations.
+Attribute everything. Quote sources properly.
 
-2. NO PADDING
-Every sentence must add new information.
-Do not restate what you just said. Do not summarize at the end of each section.
-If you have nothing new to say, stop writing.
+2. PLAIN LANGUAGE
+Short sentences. Everyday words. Active voice.
+Say "arrested" not "taken into custody". Say "said" not "stated".
 
-3. PLAIN HEADLINES
-One H1. Short. No colon splitting it into two parts. No buzzwords.
-Same rules for H2 headings inside the article.
-Never repeat the H1 title anywhere in the article body.
+3. NO PADDING
+Every sentence adds new information. No restating. No summaries at section ends.
 
-4. SOURCE FIRST
-When source material is provided, use it as the primary reference.
-Do not invent facts, quotes, statistics, or citations.
-If something is uncertain, say so simply rather than fabricating details.
+4. IMAGES GO IN THE ARTICLE
+When images are provided, place them inside the article body using <figure><img/><figcaption></figcaption></figure>.
+First image goes after the lead paragraph. Never skip provided images.
 
-5. EXTERNAL LINKS
-Always include 2-3 links to real, authoritative external sources.
-Only use URLs you are confident actually exist. Never invent a URL.
+5. ALL 5 LINKS ARE MANDATORY
+Primary source attribution, authority agency, 2 internal previous articles, 1 additional external reference.
+All 5 must appear. No exceptions.
+
+6. SUBTLE LEGAL ANGLE
+Include one section addressing the legal dimension briefly -- what law applies, what the penalties are, what precedent exists. Keep it factual, not preachy.
+
+7. ONE H1 ONLY
+Never repeat the title in the article body. Go straight from <h1> into the lead paragraph.
 
 FORMATTING:
-- Semantic HTML only: h1, h2, h3, p, ul, ol, li, a
-- One h1 only
+- Semantic HTML only: h1, h2, p, figure, img, figcaption, a, ul, ol, li
 - No markdown
-- No repeated title after the h1
+- No repeated title after h1
 
-NEVER USE THESE WORDS OR PHRASES:
+NEVER USE:
 delve, realm, landscape, crucial, vital, game-changing, transformative, unveiling,
-navigating, empowering, comprehensive guide, in-depth look, it is worth noting,
-in today's fast-paced world, in an era of, as we can see, to summarize,
-in conclusion, this is important because`;
+navigating, empowering, it is worth noting, in today's world, in an era of,
+as we can see, to summarise, in conclusion, this is important because`;
   }
 
   private buildSEOGuidance(keyword: string, focus?: string, density?: number): string {
     let guidance = `Mention "${keyword}" naturally where it fits. `;
-
     switch (focus) {
-      case 'primary_keyword':
-        guidance += `Use the exact phrase naturally throughout.`;
-        break;
-      case 'semantic_keywords':
-        guidance += `Focus on related concepts and semantic variations.`;
-        break;
-      case 'long_tail':
-        guidance += `Include natural long-tail variations in headings and body.`;
-        break;
-      default:
-        guidance += `Balance the keyword with natural language.`;
+      case 'primary_keyword': guidance += `Use the exact phrase naturally throughout.`; break;
+      case 'semantic_keywords': guidance += `Focus on related concepts and semantic variations.`; break;
+      case 'long_tail': guidance += `Include natural long-tail variations in headings and body.`; break;
+      default: guidance += `Balance the keyword with natural language.`;
     }
-
-    if (density && density > 0) {
-      guidance += ` Target ~${density}% density but prioritize readability.`;
-    }
-
+    if (density && density > 0) guidance += ` Target ~${density}% density but prioritise readability.`;
     return guidance;
   }
 
-  private getStyleReference(style: string): string {
-    const references: Record<string, string> = {
-      conversational: 'a thoughtful writer for The Atlantic or Medium',
-      academic: 'an accessible academic researcher',
-      journalistic: 'a professional news journalist',
-      technical: 'a precise technical educator',
-      creative: 'a narrative feature writer',
-    };
-    return references[style] || references.conversational;
-  }
-
   private getAudienceDescription(audience: string): string {
-    if (audience.toLowerCase().includes('beginner')) {
-      return 'Explain everything clearly -- assume no prior knowledge.';
-    }
-    if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) {
-      return 'Skip the basics -- focus on depth and nuance.';
-    }
-    return 'Assume intelligence but not expertise -- explain ideas without being condescending.';
+    if (audience.toLowerCase().includes('beginner')) return 'Explain everything clearly -- assume no prior knowledge.';
+    if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) return 'Skip basics -- focus on depth.';
+    return 'Assume intelligence but not expertise.';
   }
 
-  validateInternalLinks(
-    content: string,
-    requiredLinks: InternalLink[]
-  ): {
-    valid: boolean;
-    foundLinks: number;
-    missingLinks: InternalLink[];
-    issues: string[];
+  validateInternalLinks(content: string, requiredLinks: InternalLink[]): {
+    valid: boolean; foundLinks: number; missingLinks: InternalLink[]; issues: string[];
   } {
     const issues: string[] = [];
     const missingLinks: InternalLink[] = [];
     let foundLinks = 0;
 
     for (const link of requiredLinks) {
-      if (content.includes(link.url)) {
-        foundLinks++;
-      } else {
-        missingLinks.push(link);
-      }
+      if (content.includes(link.url)) foundLinks++;
+      else missingLinks.push(link);
     }
 
     const minRequired = Math.ceil(requiredLinks.length * 0.5);
     const valid = foundLinks >= minRequired;
-
-    if (!valid) {
-      issues.push(`Only ${foundLinks} of ${requiredLinks.length} internal links included (minimum: ${minRequired})`);
-    }
-
-    const anchorTags = content.match(/<a\s+href="[^"]+">.*?<\/a>/gi) || [];
-    if (anchorTags.length < foundLinks) {
-      issues.push('Some URLs were found but not properly formatted as anchor tags');
-    }
+    if (!valid) issues.push(`Only ${foundLinks} of ${requiredLinks.length} internal links included (minimum: ${minRequired})`);
 
     logger.info(`Internal link validation: ${foundLinks}/${requiredLinks.length} links found, valid: ${valid}`);
-
     return { valid, foundLinks, missingLinks, issues };
   }
 
@@ -427,11 +432,9 @@ in conclusion, this is important because`;
     const linkRegex = /<a\s+href="([^"]+)">([^<]+)<\/a>/gi;
     const links: Array<{ url: string; anchorText: string }> = [];
     let match;
-
     while ((match = linkRegex.exec(content)) !== null) {
       links.push({ url: match[1], anchorText: match[2] });
     }
-
     return links;
   }
 }

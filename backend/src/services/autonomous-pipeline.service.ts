@@ -43,10 +43,13 @@ export class AutonomousPipelineService {
     let proQuotaExhausted = false;
 
     try {
-      const rssItems = await rssService.fetchItems(config.niche, config.maxArticlesPerRun);
+      // Support both old `niche` (string) and new `niches` (string[])
+      const niches: string[] = (config as any).niches?.length
+        ? (config as any).niches
+        : [(config as any).niche].filter(Boolean);
 
-      if (rssItems.length === 0) {
-        logger.warn(`No RSS items found for niche "${config.niche}" -- run aborted`);
+      if (niches.length === 0) {
+        logger.warn(`Pipeline ${configId} has no niches configured -- run aborted`);
         pipelineRun.status = 'completed';
         pipelineRun.completedAt = new Date();
         await pipelineRun.save();
@@ -55,9 +58,22 @@ export class AutonomousPipelineService {
         return;
       }
 
-      logger.info(`Pipeline ${configId}: processing ${rssItems.length} RSS item(s) for niche "${config.niche}"`);
+      const rssItems = await rssService.fetchItemsForNiches(niches, config.maxArticlesPerRun);
 
-      const internalLinks = await this.fetchInternalLinks(siteIdString, config.niche);
+      if (rssItems.length === 0) {
+        logger.warn(`No RSS items found for niches [${niches.join(', ')}] -- run aborted`);
+        pipelineRun.status = 'completed';
+        pipelineRun.completedAt = new Date();
+        await pipelineRun.save();
+        config.lastRunAt = new Date();
+        await config.save();
+        return;
+      }
+
+      logger.info(`Pipeline ${configId}: processing ${rssItems.length} RSS item(s) for niches [${niches.join(', ')}]`);
+
+      // Fetch internal links (published articles from our sitemap)
+      const internalLinks = await this.fetchInternalLinks(siteIdString, niches[0]);
 
       let articleIndex = 0;
 
@@ -65,20 +81,30 @@ export class AutonomousPipelineService {
         try {
           let contextSeed = [item.title, item.description].filter(Boolean).join('\n\n');
           let scrapedImages: ScrapedImage[] = [];
+          let sourceUrl = item.link;
+          let sourceName = item.source || '';
 
-          try {
-            const scraped = await scraperService.extract(item.link);
-            scrapedImages = scraped.images || [];
+          // Only scrape real article URLs -- Google News redirects return 1 word
+          const isGoogleNewsUrl = item.link.includes('news.google.com');
 
-            if (scraped.wordCount >= MIN_CONTEXT_WORDS) {
-              contextSeed = scraped.text;
-              logger.info(`Scraped ${scraped.wordCount} words and ${scrapedImages.length} images from ${item.link}`);
-            } else {
-              contextSeed = [item.title, item.description, scraped.text].filter(Boolean).join('\n\n');
-              logger.warn(`Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`);
+          if (!isGoogleNewsUrl) {
+            try {
+              const scraped = await scraperService.extract(item.link);
+              scrapedImages = scraped.images || [];
+              sourceUrl = scraped.sourceUrl || item.link;
+
+              if (scraped.wordCount >= MIN_CONTEXT_WORDS) {
+                contextSeed = scraped.text;
+                logger.info(`Scraped ${scraped.wordCount} words and ${scrapedImages.length} images from ${item.link}`);
+              } else {
+                contextSeed = [item.title, item.description, scraped.text].filter(Boolean).join('\n\n');
+                logger.warn(`Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`);
+              }
+            } catch (scrapeErr: any) {
+              logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS seed`);
             }
-          } catch (scrapeErr: any) {
-            logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS seed`);
+          } else {
+            logger.info(`Google News URL for "${item.title}" -- skipping scrape, relying on grounding`);
           }
 
           const isDuplicate = await this.isDuplicateTopic(config.userId.toString(), item.title);
@@ -93,42 +119,42 @@ export class AutonomousPipelineService {
           }
 
           const additionalContext = [
-            `Source: ${item.title}`,
+            `Source article title: ${item.title}`,
             `Published: ${item.pubDate}`,
-            `From: ${item.source}`,
+            `Source outlet: ${item.source}`,
+            `Source URL: ${sourceUrl}`,
             '',
             contextSeed,
           ].join('\n');
 
-          logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars)`);
+          logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars, images: ${scrapedImages.length})`);
 
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
           const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
 
+          // Pass images and source URL into the generation options
           let articleResult: any;
+          const generationOptions = {
+            wordCount: config.targetWordCount,
+            additionalContext,
+            tone: 'journalistic',
+            writingStyle: 'journalistic' as const,
+            internalLinkSuggestions: trimmedLinks,
+            includeInternalLinks: trimmedLinks.length > 0,
+            maxInternalLinks: trimmedLinks.length,
+            includeExternalLinks: true,
+            sourceUrl,
+            sourceName,
+            articleImages: scrapedImages.map(img => ({ url: img.url, alt: img.alt })),
+          };
+
           try {
-            articleResult = await aiService.generateBlogPost(item.title, modelToUse, {
-              wordCount: config.targetWordCount,
-              additionalContext,
-              tone: 'journalistic',
-              internalLinkSuggestions: trimmedLinks,
-              includeInternalLinks: trimmedLinks.length > 0,
-              maxInternalLinks: trimmedLinks.length,
-              includeExternalLinks: true, // always on for pipeline articles
-            });
+            articleResult = await aiService.generateBlogPost(item.title, modelToUse, generationOptions);
           } catch (genErr: any) {
             if (this.isQuotaError(genErr) && !proQuotaExhausted) {
               proQuotaExhausted = true;
               logger.warn('Pro quota exhausted -- remaining articles this run will use Flash');
-              articleResult = await aiService.generateBlogPost(item.title, 'gemini', {
-                wordCount: config.targetWordCount,
-                additionalContext,
-                tone: 'journalistic',
-                internalLinkSuggestions: trimmedLinks,
-                includeInternalLinks: trimmedLinks.length > 0,
-                maxInternalLinks: trimmedLinks.length,
-                includeExternalLinks: true,
-              });
+              articleResult = await aiService.generateBlogPost(item.title, 'gemini', generationOptions);
             } else {
               throw genErr;
             }
@@ -145,6 +171,9 @@ export class AutonomousPipelineService {
               ? new Date(Date.now() + staggeredMinutes * 60 * 1000)
               : undefined;
 
+          // Use niches as WordPress tags so each niche area becomes a tag
+          const wordpressTags = niches.map(n => n.trim()).filter(Boolean);
+
           const content = new Content({
             userId: config.userId,
             siteId: siteObjectId,
@@ -158,6 +187,7 @@ export class AutonomousPipelineService {
             wordCount: articleResult.wordCount,
             readingTime: Math.ceil(articleResult.wordCount / 200),
             aiGenerated: true,
+            tags: wordpressTags,
           });
           await content.save();
 
@@ -169,10 +199,9 @@ export class AutonomousPipelineService {
               `Content ${content._id} scheduled -- publishes at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`
             );
           } else {
-            // Publish immediately
             const fullSite = await Site.findById(siteObjectId).select('+applicationPassword');
             if (fullSite) {
-              // Upload scraped images to WordPress media library
+              // Upload first scraped image as featured image
               let featuredImageId: number | undefined;
               if (scrapedImages.length > 0) {
                 featuredImageId = await wordpressService.uploadImageFromUrl(
@@ -188,7 +217,9 @@ export class AutonomousPipelineService {
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
                 featuredImageId,
+                tags: wordpressTags,
               });
+
               if (publishResult.success) {
                 content.status = 'published';
                 content.publishedPostId = publishResult.postId;
@@ -196,7 +227,7 @@ export class AutonomousPipelineService {
                 content.publishedAt = new Date();
                 await content.save();
                 pipelineRun.articlesPublished += 1;
-                logger.info(`Published "${item.title}" to WordPress`);
+                logger.info(`Published "${item.title}" to WordPress with tags: [${wordpressTags.join(', ')}]`);
               } else {
                 throw new Error(publishResult.error);
               }
@@ -250,9 +281,7 @@ export class AutonomousPipelineService {
         const existingText = `${existing.keyword || ''} ${existing.title || ''}`.toLowerCase();
         const matchCount = keywords.filter(kw => existingText.includes(kw)).length;
         if (matchCount >= 2) {
-          logger.info(
-            `Duplicate detected: "${topic}" matches existing content "${existing.title}" (${matchCount} keyword overlaps)`
-          );
+          logger.info(`Duplicate detected: "${topic}" matches "${existing.title}" (${matchCount} overlaps)`);
           return true;
         }
       }

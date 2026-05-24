@@ -12,12 +12,12 @@ export interface RSSItem {
 }
 
 const CATEGORY_FEEDS: Record<string, string> = {
-  business: 'https://feeds.reuters.com/reuters/businessNews',
-  technology: 'https://feeds.reuters.com/reuters/technologyNews',
-  health: 'https://feeds.reuters.com/reuters/healthNews',
-  science: 'https://feeds.reuters.com/reuters/scienceNews',
-  sports: 'https://feeds.reuters.com/reuters/sportsNews',
-  general: 'https://news.google.com/rss?hl=en&gl=US&ceid=US:en',
+  business:    'https://feeds.reuters.com/reuters/businessNews',
+  technology:  'https://feeds.reuters.com/reuters/technologyNews',
+  health:      'https://feeds.reuters.com/reuters/healthNews',
+  science:     'https://feeds.reuters.com/reuters/scienceNews',
+  sports:      'https://feeds.reuters.com/reuters/sportsNews',
+  general:     'https://news.google.com/rss?hl=en&gl=US&ceid=US:en',
 };
 
 const CATEGORIES = Object.keys(CATEGORY_FEEDS);
@@ -28,37 +28,23 @@ function buildGoogleNewsUrl(keyword: string): string {
   return `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=en&gl=US&ceid=US:en`;
 }
 
-function isWithin48Hours(pubDate: string): boolean {
+// Only fetch articles published within the last 4 hours
+function isWithin4Hours(pubDate: string): boolean {
   if (!pubDate) return true;
   const published = new Date(pubDate).getTime();
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const cutoff = Date.now() - 4 * 60 * 60 * 1000;
   return published >= cutoff;
 }
 
-/**
- * Google News RSS links are encoded redirect URLs that axios cannot follow
- * because they use a JS/HTML redirect rather than HTTP 301/302.
- *
- * Strategy 1: Check item.guid — Google sometimes puts the real URL there.
- * Strategy 2: Check the <source url="..."> attribute in the raw feed item.
- * Strategy 3: Follow the redirect by fetching the Google News URL and
- *             reading the final Location from the response chain, or
- *             parsing the canonical link from the HTML response.
- * Strategy 4: Fall back to the original link (scraper will get 1 word, but
- *             the pipeline will skip it via the MIN_CONTEXT_WORDS check).
- */
 async function resolveGoogleNewsUrl(googleNewsUrl: string, rawItem: any): Promise<string> {
-  // Strategy 1: guid sometimes contains the real URL directly
   if (rawItem.guid && rawItem.guid.startsWith('http') && !rawItem.guid.includes('news.google.com')) {
     return rawItem.guid;
   }
 
-  // Strategy 2: source url attribute (present in some GNews feeds)
   if (rawItem.source?.url && !rawItem.source.url.includes('news.google.com')) {
     return rawItem.source.url;
   }
 
-  // Strategy 3: Fetch the Google News page and extract canonical/redirect URL
   try {
     const response = await axios.get(googleNewsUrl, {
       timeout: 8000,
@@ -67,47 +53,26 @@ async function resolveGoogleNewsUrl(googleNewsUrl: string, rawItem: any): Promis
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      validateStatus: () => true, // don't throw on any status
+      validateStatus: () => true,
     });
 
     const html: string = response.data || '';
 
-    // Look for canonical link tag
     const canonicalMatch = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
       || html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
     if (canonicalMatch && !canonicalMatch[1].includes('news.google.com')) {
-      logger.info(`Resolved via canonical: ${canonicalMatch[1]}`);
       return canonicalMatch[1];
     }
 
-    // Look for meta refresh redirect
-    const metaRefreshMatch = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["']/i);
-    if (metaRefreshMatch) {
-      const redirectUrl = metaRefreshMatch[1].trim();
-      if (!redirectUrl.includes('news.google.com')) {
-        logger.info(`Resolved via meta-refresh: ${redirectUrl}`);
-        return redirectUrl;
-      }
-    }
-
-    // Look for window.location or data-n-au attribute (Google News specific)
     const dataAttrMatch = html.match(/data-n-au="([^"]+)"/);
-    if (dataAttrMatch) {
-      logger.info(`Resolved via data-n-au: ${dataAttrMatch[1]}`);
-      return dataAttrMatch[1];
-    }
+    if (dataAttrMatch) return dataAttrMatch[1];
 
-    // Check if axios followed redirects to a non-Google URL
     const finalUrl: string = response.request?.res?.responseUrl || '';
-    if (finalUrl && !finalUrl.includes('news.google.com')) {
-      logger.info(`Resolved via redirect chain: ${finalUrl}`);
-      return finalUrl;
-    }
+    if (finalUrl && !finalUrl.includes('news.google.com')) return finalUrl;
   } catch (err: any) {
-    logger.warn(`Could not resolve Google News URL ${googleNewsUrl}: ${err.message}`);
+    logger.warn(`Could not resolve Google News URL: ${err.message}`);
   }
 
-  // Strategy 4: return original — scraper will fail, pipeline will skip via MIN_CONTEXT_WORDS
   return googleNewsUrl;
 }
 
@@ -116,6 +81,9 @@ function isGoogleNewsUrl(url: string): boolean {
 }
 
 export class RSSService {
+  /**
+   * Fetch items for a single keyword/niche.
+   */
   async fetchItems(keyword: string, limit = 5): Promise<RSSItem[]> {
     const isCategory = CATEGORIES.includes(keyword.toLowerCase());
     const primaryUrl = isCategory
@@ -127,7 +95,7 @@ export class RSSService {
       if (items.length > 0) return items;
       throw new Error('No items returned from primary feed');
     } catch (err: any) {
-      logger.warn(`RSS primary feed failed for "${keyword}": ${err.message} — trying Google News fallback`);
+      logger.warn(`RSS primary feed failed for "${keyword}": ${err.message} -- trying Google News fallback`);
       try {
         return await this._parseFeed(buildGoogleNewsUrl(keyword), limit);
       } catch (fallbackErr: any) {
@@ -137,21 +105,52 @@ export class RSSService {
     }
   }
 
+  /**
+   * Fetch items across multiple keywords, deduplicating by title.
+   * Distributes the limit evenly across keywords.
+   */
+  async fetchItemsForNiches(niches: string[], totalLimit = 5): Promise<RSSItem[]> {
+    if (!niches || niches.length === 0) return [];
+
+    const perNiche = Math.max(1, Math.ceil(totalLimit / niches.length));
+    const seen = new Set<string>();
+    const allItems: RSSItem[] = [];
+
+    for (const niche of niches) {
+      try {
+        const items = await this.fetchItems(niche.trim(), perNiche);
+        for (const item of items) {
+          // Deduplicate by normalised title
+          const key = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 60);
+          if (!seen.has(key)) {
+            seen.add(key);
+            allItems.push(item);
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`RSS fetch failed for niche "${niche}": ${err.message}`);
+      }
+    }
+
+    // Sort by pubDate descending (most recent first) and cap at totalLimit
+    return allItems
+      .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+      .slice(0, totalLimit);
+  }
+
   private async _parseFeed(url: string, limit: number): Promise<RSSItem[]> {
     const feed = await parser.parseURL(url);
     const items: RSSItem[] = [];
 
     for (const item of feed.items || []) {
       if (!item.title || !item.link) continue;
-      if (!isWithin48Hours(item.pubDate || '')) continue;
 
-      // Resolve the real article URL if this is a Google News redirect link
+      // Only include articles from the last 4 hours
+      if (!isWithin4Hours(item.pubDate || '')) continue;
+
       let articleUrl = item.link;
       if (isGoogleNewsUrl(item.link)) {
         articleUrl = await resolveGoogleNewsUrl(item.link, item);
-        if (articleUrl !== item.link) {
-          logger.info(`Resolved Google News URL: ${item.title.substring(0, 50)} -> ${articleUrl}`);
-        }
       }
 
       items.push({

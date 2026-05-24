@@ -3,18 +3,19 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import logger from '../config/logger';
 
-export interface ScrapedContent {
-  text: string;
-  title: string;
-  wordCount: number;
-  images: ScrapedImage[];
-}
-
 export interface ScrapedImage {
   url: string;
   alt: string;
   width?: number;
   height?: number;
+}
+
+export interface ScrapedContent {
+  text: string;
+  title: string;
+  wordCount: number;
+  images: ScrapedImage[];
+  sourceUrl: string;
 }
 
 export class ScraperService {
@@ -39,7 +40,7 @@ export class ScraperService {
 
     const $ = cheerio.load(response.data);
 
-    // Handle meta-refresh redirects (used by Google News)
+    // Handle meta-refresh redirects
     const metaRefresh = $('meta[http-equiv="refresh"]').attr('content');
     if (metaRefresh) {
       const match = metaRefresh.match(/url=(.+)/i);
@@ -49,7 +50,7 @@ export class ScraperService {
       }
     }
 
-    // Extract images BEFORE removing elements
+    // Extract images BEFORE removing nav/footer elements
     const images = this.extractImages($, url);
 
     // Remove unwanted elements
@@ -61,54 +62,38 @@ export class ScraperService {
     // Try to get main content area
     let mainContent = '';
     const articleSelectors = [
-      'article',
-      '[role="main"]',
-      'main',
-      '.post-content',
-      '.article-body',
-      '#content',
-      '.entry-content',
-      '.story-body',
+      'article', '[role="main"]', 'main',
+      '.post-content', '.article-body', '#content',
+      '.entry-content', '.story-body',
     ];
     for (const sel of articleSelectors) {
       const el = $(sel);
-      if (el.length) {
-        mainContent = el.text();
-        break;
-      }
+      if (el.length) { mainContent = el.text(); break; }
     }
-    if (!mainContent) {
-      mainContent = $('body').text();
-    }
+    if (!mainContent) mainContent = $('body').text();
 
     let text = mainContent.replace(/\s+/g, ' ').trim();
-
     const words = text.split(/\s+/);
     const MAX_WORDS = 3000;
-    if (words.length > MAX_WORDS) {
-      text = words.slice(0, MAX_WORDS).join(' ');
-    }
+    if (words.length > MAX_WORDS) text = words.slice(0, MAX_WORDS).join(' ');
 
     const wordCount = words.length;
     logger.info(`Scraped ${wordCount} words and ${images.length} images from ${url}`);
 
-    return { text, title, wordCount, images };
+    return { text, title, wordCount, images, sourceUrl: url };
   }
 
   private extractImages($: cheerio.CheerioAPI, baseUrl: string): ScrapedImage[] {
     const images: ScrapedImage[] = [];
     const seen = new Set<string>();
 
-    // Priority 1: Open Graph image (best quality, editorial choice)
+    // Priority 1: Open Graph image
     const ogImage = $('meta[property="og:image"]').attr('content');
     if (ogImage) {
       const resolved = this.resolveUrl(ogImage, baseUrl);
       if (resolved && !seen.has(resolved)) {
         seen.add(resolved);
-        images.push({
-          url: resolved,
-          alt: $('meta[property="og:image:alt"]').attr('content') || '',
-        });
+        images.push({ url: resolved, alt: $('meta[property="og:image:alt"]').attr('content') || '' });
       }
     }
 
@@ -118,66 +103,48 @@ export class ScraperService {
       const resolved = this.resolveUrl(twitterImage, baseUrl);
       if (resolved && !seen.has(resolved)) {
         seen.add(resolved);
-        images.push({
-          url: resolved,
-          alt: $('meta[name="twitter:image:alt"]').attr('content') || '',
-        });
+        images.push({ url: resolved, alt: $('meta[name="twitter:image:alt"]').attr('content') || '' });
       }
     }
 
-    // Priority 3: Article/main content images
-    const contentSelectors = ['article img', '[role="main"] img', 'main img', '.post-content img', '.entry-content img', '.article-body img'];
+    // Priority 3: Article content images
+    const contentSelectors = [
+      'article img', '[role="main"] img', 'main img',
+      '.post-content img', '.entry-content img', '.article-body img',
+    ];
     for (const sel of contentSelectors) {
       $(sel).each((_, el) => {
-        if (images.length >= 5) return false; // max 5 images
-
+        if (images.length >= 5) return false;
         const src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
         if (!src) return;
-
         const resolved = this.resolveUrl(src, baseUrl);
         if (!resolved || seen.has(resolved)) return;
-
-        // Skip tiny images (icons, avatars, tracking pixels)
         const width = parseInt($(el).attr('width') || '0');
         const height = parseInt($(el).attr('height') || '0');
         if ((width > 0 && width < 200) || (height > 0 && height < 150)) return;
-
-        // Skip obvious non-editorial images
         if (this.isJunkImage(resolved)) return;
-
         seen.add(resolved);
-        images.push({
-          url: resolved,
-          alt: $(el).attr('alt') || '',
-          width: width || undefined,
-          height: height || undefined,
-        });
+        images.push({ url: resolved, alt: $(el).attr('alt') || '', width: width || undefined, height: height || undefined });
       });
-      if (images.length >= 3) break; // stop after first selector that yields images
+      if (images.length >= 3) break;
     }
 
-    return images.slice(0, 3); // cap at 3
+    return images.slice(0, 3);
   }
 
   private resolveUrl(src: string, baseUrl: string): string | null {
     try {
       if (src.startsWith('//')) return `https:${src}`;
       if (src.startsWith('http')) return src;
-      const base = new URL(baseUrl);
-      return new URL(src, base).href;
-    } catch {
-      return null;
-    }
+      return new URL(src, new URL(baseUrl)).href;
+    } catch { return null; }
   }
 
   private isJunkImage(url: string): boolean {
     const lower = url.toLowerCase();
-    const junkPatterns = [
-      'avatar', 'logo', 'icon', 'spinner', 'loading', 'pixel',
-      'tracking', 'beacon', 'ads', 'banner', 'badge', 'button',
-      '.gif', 'gravatar', '1x1', '2x2',
-    ];
-    return junkPatterns.some(p => lower.includes(p));
+    return ['avatar', 'logo', 'icon', 'spinner', 'loading', 'pixel', 'tracking',
+      'beacon', 'ads', 'banner', 'badge', 'button', '.gif', 'gravatar', '1x1', '2x2',
+    ].some(p => lower.includes(p));
   }
 }
 

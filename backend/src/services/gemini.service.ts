@@ -48,6 +48,9 @@ interface ContentGenerationOptions {
 
   // External links
   includeExternalLinks?: boolean;
+  sourceUrl?: string;
+  sourceName?: string;
+  articleImages?: Array<{ url: string; alt: string }>;
 }
 
 export class GeminiService {

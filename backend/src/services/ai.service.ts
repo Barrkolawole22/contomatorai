@@ -78,6 +78,9 @@ interface GenerationOptions {
   }>;
   maxInternalLinks?: number;
   internalLinkDensity?: number;
+  sourceUrl?: string;
+  sourceName?: string;
+  articleImages?: Array<{ url: string; alt: string }>;
 }
 
 function isQuotaError(error: any): boolean {

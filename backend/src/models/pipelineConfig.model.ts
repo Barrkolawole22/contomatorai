@@ -1,11 +1,12 @@
+// backend/src/models/pipelineConfig.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IPipelineConfig extends Document {
   userId: mongoose.Types.ObjectId;
   siteId: mongoose.Types.ObjectId;
   isActive: boolean;
-  schedule: 'hourly' | 'twice_daily' | 'daily' | 'weekly';
-  niche: string;
+  schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
+  niches: string[];
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -19,8 +20,12 @@ const pipelineConfigSchema = new Schema<IPipelineConfig>({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   siteId: { type: Schema.Types.ObjectId, ref: 'Site', required: true },
   isActive: { type: Boolean, default: true },
-  schedule: { type: String, enum: ['hourly', 'twice_daily', 'daily', 'weekly'], required: true },
-  niche: { type: String, required: true },
+  schedule: {
+    type: String,
+    enum: ['hourly', 'every_2_hours', 'every_4_hours', 'twice_daily', 'three_daily', 'daily', 'weekly'],
+    required: true,
+  },
+  niches: { type: [String], required: true },
   targetWordCount: { type: Number, default: 1500 },
   aiModel: { type: String, enum: ['gemini', 'gemini-pro', 'gpt4o', 'claude'], default: 'gemini' },
   previewWindowMinutes: { type: Number, default: 60 },
