@@ -235,7 +235,7 @@ export class BulkSchedulerService {
             });
 
             await content.save();
-            await user.deductWordCredits(creditsPerArticle, content._id.toString(), 'bulk_schedule_reservation');
+            await user.deductWordCredits(creditsPerArticle, content._id.toString(), 'bulk_generation');
 
             results.successful++;
             results.totalCreditsUsed += creditsPerArticle;
