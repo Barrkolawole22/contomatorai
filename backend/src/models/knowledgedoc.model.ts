@@ -1,13 +1,6 @@
 // backend/src/models/knowledgedoc.model.ts
 import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IChunk {
-  chunkIndex: number;
-  text: string;
-  embedding: number[];
-  wordCount: number;
-}
-
 export interface IKnowledgeDoc extends Document {
   userId: mongoose.Types.ObjectId;
   title: string;
@@ -18,22 +11,11 @@ export interface IKnowledgeDoc extends Document {
   fileSize: number;
   status: 'processing' | 'ready' | 'failed';
   processingError?: string;
-  chunks: IChunk[];
-  totalChunks: number;
+  fullText: string;
   totalWords: number;
   createdAt: Date;
   updatedAt: Date;
 }
-
-const ChunkSchema = new Schema<IChunk>(
-  {
-    chunkIndex: { type: Number, required: true },
-    text: { type: String, required: true },
-    embedding: { type: [Number], required: true },
-    wordCount: { type: Number, required: true },
-  },
-  { _id: false }
-);
 
 const KnowledgeDocSchema = new Schema<IKnowledgeDoc>(
   {
@@ -56,8 +38,7 @@ const KnowledgeDocSchema = new Schema<IKnowledgeDoc>(
       index: true,
     },
     processingError: { type: String },
-    chunks: { type: [ChunkSchema], default: [] },
-    totalChunks: { type: Number, default: 0 },
+    fullText: { type: String, default: '' },
     totalWords: { type: Number, default: 0 },
   },
   { timestamps: true }

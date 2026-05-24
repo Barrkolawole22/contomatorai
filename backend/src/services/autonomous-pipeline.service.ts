@@ -16,6 +16,31 @@ import logger from '../config/logger';
 const MIN_CONTEXT_WORDS = 100;
 const PUBLISH_STAGGER_MINUTES = 120;
 const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
+const MAX_TAGS = 10;
+
+/**
+ * Pick the most relevant niches for the article title, capped at MAX_TAGS.
+ * Scores by counting how many words from each niche appear in the title.
+ * Falls back to first MAX_TAGS niches if nothing scores.
+ */
+function selectRelevantTags(niches: string[], articleTitle: string): string[] {
+  const titleWords = articleTitle.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+
+  const scored = niches
+    .map(niche => {
+      const nicheWords = niche.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+      const score = nicheWords.filter(w => w.length > 2 && titleWords.includes(w)).length;
+      return { niche: niche.trim(), score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  // Take all that scored > 0, then pad with remaining niches up to MAX_TAGS
+  const withScore = scored.filter(s => s.score > 0).map(s => s.niche);
+  const withoutScore = scored.filter(s => s.score === 0).map(s => s.niche);
+  const combined = [...withScore, ...withoutScore];
+
+  return combined.slice(0, MAX_TAGS);
+}
 
 export class AutonomousPipelineService {
   async runPipeline(configId: string): Promise<void> {
@@ -43,7 +68,6 @@ export class AutonomousPipelineService {
     let proQuotaExhausted = false;
 
     try {
-      // Support both old `niche` (string) and new `niches` (string[])
       const niches: string[] = (config as any).niches?.length
         ? (config as any).niches
         : [(config as any).niche].filter(Boolean);
@@ -72,7 +96,6 @@ export class AutonomousPipelineService {
 
       logger.info(`Pipeline ${configId}: processing ${rssItems.length} RSS item(s) for niches [${niches.join(', ')}]`);
 
-      // Fetch internal links (published articles from our sitemap)
       const internalLinks = await this.fetchInternalLinks(siteIdString, niches[0]);
 
       let articleIndex = 0;
@@ -84,7 +107,6 @@ export class AutonomousPipelineService {
           let sourceUrl = item.link;
           let sourceName = item.source || '';
 
-          // Only scrape real article URLs -- Google News redirects return 1 word
           const isGoogleNewsUrl = item.link.includes('news.google.com');
 
           if (!isGoogleNewsUrl) {
@@ -132,7 +154,6 @@ export class AutonomousPipelineService {
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
           const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
 
-          // Pass images and source URL into the generation options
           let articleResult: any;
           const generationOptions = {
             wordCount: config.targetWordCount,
@@ -171,8 +192,9 @@ export class AutonomousPipelineService {
               ? new Date(Date.now() + staggeredMinutes * 60 * 1000)
               : undefined;
 
-          // Use niches as WordPress tags so each niche area becomes a tag
-          const wordpressTags = niches.map(n => n.trim()).filter(Boolean);
+          // Select relevant tags, capped at MAX_TAGS (10)
+          const wordpressTags = selectRelevantTags(niches, articleResult.title);
+          logger.info(`Tags selected for "${articleResult.title}": [${wordpressTags.join(', ')}]`);
 
           const content = new Content({
             userId: config.userId,
@@ -201,7 +223,6 @@ export class AutonomousPipelineService {
           } else {
             const fullSite = await Site.findById(siteObjectId).select('+applicationPassword');
             if (fullSite) {
-              // Upload first scraped image as featured image
               let featuredImageId: number | undefined;
               if (scrapedImages.length > 0) {
                 featuredImageId = await wordpressService.uploadImageFromUrl(

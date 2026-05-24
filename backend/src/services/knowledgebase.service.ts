@@ -5,20 +5,10 @@ import mammoth from 'mammoth';
 import KnowledgeDoc, { IKnowledgeDoc } from '../models/knowledgedoc.model';
 import logger from '../config/logger';
 
-// Projection to exclude the potentially massive chunks array from list queries
-const WITHOUT_CHUNKS = { chunks: 0 } as const;
-
-const MIN_SCORE = 0.15;
-const MAX_CONTEXT_WORDS = 2000;
+const MAX_WORDS = 4000; // ~10 pages safety cap
 
 export class KnowledgebaseService {
-  // ─── Public API ────────────────────────────────────────────────────────────
 
-  /**
-   * Save the uploaded file, create a DB record with status "processing",
-   * then kick off async processing (chunk + embed). Returns immediately so
-   * the HTTP response is fast.
-   */
   async uploadDocument(
     userId: string,
     file: Express.Multer.File,
@@ -40,7 +30,6 @@ export class KnowledgebaseService {
 
     await doc.save();
 
-    // Fire-and-forget — errors are caught inside processDocument
     this.processDocument(doc._id.toString(), file.path, fileExt).catch((err) => {
       logger.error(`Background processing failed for doc ${doc._id}:`, err);
     });
@@ -48,25 +37,23 @@ export class KnowledgebaseService {
     return doc;
   }
 
-  /** List all documents for a user (no chunk data returned). */
   async getDocuments(userId: string): Promise<IKnowledgeDoc[]> {
-    return KnowledgeDoc.find({ userId }, WITHOUT_CHUNKS).sort({ createdAt: -1 }).lean() as unknown as IKnowledgeDoc[];
+    return KnowledgeDoc.find({ userId }, { fullText: 0 })
+      .sort({ createdAt: -1 })
+      .lean() as unknown as IKnowledgeDoc[];
   }
 
-  /** Single document metadata (no chunk data). */
   async getDocumentById(userId: string, docId: string): Promise<IKnowledgeDoc | null> {
-    return KnowledgeDoc.findOne({ _id: docId, userId }, WITHOUT_CHUNKS).lean() as unknown as IKnowledgeDoc | null;
+    return KnowledgeDoc.findOne({ _id: docId, userId }, { fullText: 0 })
+      .lean() as unknown as IKnowledgeDoc | null;
   }
 
-  /** Delete a document from MongoDB and disk. */
   async deleteDocument(userId: string, docId: string): Promise<boolean> {
     const doc = await KnowledgeDoc.findOne({ _id: docId, userId });
     if (!doc) return false;
 
     if (fs.existsSync(doc.filePath)) {
-      try {
-        fs.unlinkSync(doc.filePath);
-      } catch (err) {
+      try { fs.unlinkSync(doc.filePath); } catch (err) {
         logger.warn(`Could not delete file ${doc.filePath}:`, err);
       }
     }
@@ -76,80 +63,27 @@ export class KnowledgebaseService {
   }
 
   /**
-   * RAG retrieval: embed the topic, score every chunk from the specified docs
-   * using a hybrid cosine + keyword-overlap algorithm, filter by minimum score,
-   * cap total context words, then return the top chunks as a formatted string.
+   * Returns full text of selected docs, ready to inject into the Gemini prompt.
+   * No embeddings, no chunking — the full content is the context.
    */
   async retrieveContext(
     userId: string,
-    docIds: string[],
-    topic: string
+    docIds: string[]
   ): Promise<string> {
     const docs = await KnowledgeDoc.find({
       _id: { $in: docIds },
       userId,
       status: 'ready',
-    });
+    }).select('title fullText');
 
     if (docs.length === 0) return '';
 
-    const topicEmbedding = await this.generateEmbedding(topic);
-    const topicWords = new Set(
-      topic.toLowerCase().split(/\s+/).filter(w => w.length > 3)
-    );
-
-    const scored: Array<{ text: string; score: number }> = [];
-
-    for (const doc of docs) {
-      for (const chunk of doc.chunks) {
-        // Cosine similarity score
-        const cosineScore = chunk.embedding?.length > 0
-          ? this.cosineSimilarity(topicEmbedding, chunk.embedding)
-          : 0;
-
-        // BM25-lite: keyword overlap score
-        const chunkWords = chunk.text.toLowerCase().split(/\s+/);
-        const matchCount = chunkWords.filter(w => topicWords.has(w)).length;
-        const keywordScore = Math.min(matchCount / Math.max(topicWords.size, 1), 1);
-
-        // Hybrid: weight keyword higher for domain-specific/legal content
-        const hybridScore = 0.4 * cosineScore + 0.6 * keywordScore;
-
-        scored.push({ text: chunk.text, score: hybridScore });
-      }
-    }
-
-    if (scored.length === 0) return '';
-
-    scored.sort((a, b) => b.score - a.score);
-
-    // Filter out low-relevance chunks
-    const relevant = scored.filter(c => c.score >= MIN_SCORE).slice(0, 15);
-
-    if (relevant.length === 0) {
-      logger.warn(`RAG: all chunks scored below threshold (${MIN_SCORE}), returning empty context`);
-      return '';
-    }
-
-    // Cap total context to avoid bloating the prompt
-    let wordCount = 0;
-    const cappedChunks = relevant.filter(c => {
-      const w = c.text.split(/\s+/).length;
-      if (wordCount + w > MAX_CONTEXT_WORDS) return false;
-      wordCount += w;
-      return true;
-    });
-
-    logger.info(`RAG hybrid scores: ${cappedChunks.map(c => c.score.toFixed(3)).join(', ')}`);
-    logger.info(`RAG context: ${cappedChunks.length} chunks, ~${wordCount} words`);
-    logger.info(`RAG context sample: ${cappedChunks[0]?.text?.substring(0, 200)}`);
-
-    return cappedChunks
-      .map((c, i) => `[Source Excerpt ${i + 1}]\n${c.text}`)
-      .join('\n\n---\n\n');
+    return docs
+      .map((doc) => `=== Knowledge Document: ${doc.title} ===\n${doc.fullText}`)
+      .join('\n\n');
   }
 
-  // ─── Internal helpers ───────────────────────────────────────────────────────
+  // ─── Internal ──────────────────────────────────────────────────────────────
 
   private async processDocument(
     docId: string,
@@ -157,44 +91,35 @@ export class KnowledgebaseService {
     fileType: 'docx' | 'txt'
   ): Promise<void> {
     try {
-      logger.info(`📄 Processing knowledgebase doc ${docId} (${fileType})`);
+      logger.info(`📄 Processing doc ${docId} (${fileType})`);
 
-      const text =
+      const rawText =
         fileType === 'docx'
           ? await this.extractTextFromDocx(filePath)
           : await fs.promises.readFile(filePath, 'utf-8');
 
-      if (!text || text.trim().length === 0) {
+      if (!rawText || rawText.trim().length === 0) {
         throw new Error('Document is empty or could not be read');
       }
 
-      const rawChunks = this.chunkText(text);
-      logger.info(`📄 Doc ${docId}: ${rawChunks.length} chunks, generating embeddings…`);
-
-      const processedChunks = [];
-
-      for (let i = 0; i < rawChunks.length; i++) {
-        const chunkText = rawChunks[i];
-        const embedding = await this.generateEmbedding(chunkText);
-        const wordCount = chunkText.split(/\s+/).filter((w) => w.length > 0).length;
-        processedChunks.push({ chunkIndex: i, text: chunkText, embedding, wordCount });
-
-        // Respect Gemini free-tier rate limits (~1 500 RPM)
-        if (i < rawChunks.length - 1) {
-          await this.delay(120);
-        }
+      // Enforce word cap — reject oversized docs early
+      const words = rawText.trim().split(/\s+/);
+      if (words.length > MAX_WORDS) {
+        throw new Error(
+          `Document too large: ${words.length} words (max ${MAX_WORDS}). Please upload a shorter document.`
+        );
       }
 
-      const totalWords = processedChunks.reduce((sum, c) => sum + c.wordCount, 0);
+      const fullText = rawText.trim();
+      const totalWords = words.length;
 
       await KnowledgeDoc.findByIdAndUpdate(docId, {
-        chunks: processedChunks,
-        totalChunks: processedChunks.length,
+        fullText,
         totalWords,
         status: 'ready',
       });
 
-      logger.info(`✅ Doc ${docId} ready: ${processedChunks.length} chunks, ${totalWords} words`);
+      logger.info(`✅ Doc ${docId} ready: ${totalWords} words`);
     } catch (error: any) {
       logger.error(`❌ Doc ${docId} processing failed:`, error);
       await KnowledgeDoc.findByIdAndUpdate(docId, {
@@ -207,68 +132,6 @@ export class KnowledgebaseService {
   async extractTextFromDocx(filePath: string): Promise<string> {
     const result = await mammoth.extractRawText({ path: filePath });
     return result.value;
-  }
-
-  /**
-   * Split text into ~chunkSize-word chunks with overlap words of overlap
-   * so context isn't lost at boundaries.
-   */
-  chunkText(text: string, chunkSize: number = 400, overlap: number = 50): string[] {
-    const words = text.split(/\s+/).filter((w) => w.length > 0);
-    const chunks: string[] = [];
-    let i = 0;
-
-    while (i < words.length) {
-      const chunk = words.slice(i, i + chunkSize).join(' ');
-      if (chunk.trim().length > 0) chunks.push(chunk);
-      i += chunkSize - overlap;
-    }
-
-    return chunks;
-  }
-
-  async generateEmbedding(text: string): Promise<number[]> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
-
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key=${apiKey}`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content: { parts: [{ text }] },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini embedding API error (${response.status}): ${errText}`);
-    }
-
-    const data = (await response.json()) as { embedding: { values: number[] } };
-    return data.embedding.values;
-  }
-
-  cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length || a.length === 0) return 0;
-
-    let dot = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    return denom === 0 ? 0 : dot / denom;
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
