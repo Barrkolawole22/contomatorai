@@ -36,8 +36,8 @@ async function aiRelevanceCheck(
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: { maxOutputTokens: 10, temperature: 0 },
+      model: 'gemini-2.0-flash',
+      generationConfig: { maxOutputTokens: 50, temperature: 0 },
     });
 
     const prompt = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
