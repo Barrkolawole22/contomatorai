@@ -8,6 +8,7 @@ import { ScrapedImage } from './scraper.service';
 import aiService from './ai.service';
 import Site from '../models/site.model';
 import Content from '../models/content.model';
+import User from '../models/user.model';
 import wordpressService from './wordpress.service';
 import sitemapCrawlerService from './sitemap-crawler.service';
 import { env } from '../config/env';
@@ -16,8 +17,6 @@ import logger from '../config/logger';
 const MIN_CONTEXT_WORDS = 100;
 const PUBLISH_STAGGER_MINUTES = 120;
 const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
-const MAX_TAGS = 10;
-
 // How many RSS items to fetch per run relative to the article target.
 // e.g. target=2, multiplier=10 → fetch up to 20 candidates, stop generating once 2 pass the gate.
 const RSS_FETCH_MULTIPLIER = 10;
@@ -75,41 +74,6 @@ Reply with only YES or NO.`;
     logger.warn(`AI relevance check failed: ${err.message} -- defaulting to allow`);
     return { relevant: true, reason: 'AI check failed — allowed by default' };
   }
-}
-
-/**
- * Extract up to MAX_TAGS relevant tags from the article title + content.
- */
-function extractArticleTags(title: string, content: string, niches: string[]): string[] {
-  const tags = new Set<string>();
-
-  // 1. Capitalised title words → named entities
-  title
-    .replace(/<[^>]*>/g, '')
-    .split(/\s+/)
-    .filter(w => w.length > 3 && /^[A-Z]/.test(w))
-    .map(w => w.replace(/[^a-zA-Z]/g, '').trim())
-    .filter(Boolean)
-    .slice(0, 5)
-    .forEach(w => tags.add(w));
-
-  // 2. Best-matching niche labels scored against content
-  const plainContent = `${title} ${content}`.toLowerCase().replace(/<[^>]*>/g, '');
-  const stopwords = new Set(['the','and','for','are','but','not','you','all','can','was','one','our','had','how','its','who','did','get','has','may','now','say','she','too','use','way','new','over','such','than','then','them','they','this','that','with','will','from','have','been','were']);
-
-  niches
-    .map(niche => {
-      const words = niche.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 2 && !stopwords.has(w));
-      const score = words.filter(w => plainContent.includes(w)).length;
-      return { niche: niche.trim(), score };
-    })
-    .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .forEach(({ niche }) => {
-      if (tags.size < MAX_TAGS) tags.add(niche);
-    });
-
-  return Array.from(tags).slice(0, MAX_TAGS);
 }
 
 export class AutonomousPipelineService {
@@ -280,9 +244,6 @@ export class AutonomousPipelineService {
               ? new Date(Date.now() + staggeredMinutes * 60 * 1000)
               : undefined;
 
-          const wordpressTags = extractArticleTags(articleResult.title, articleResult.content, niches);
-          logger.info(`Tags for "${articleResult.title}": [${wordpressTags.join(', ')}]`);
-
           const content = new Content({
             userId: config.userId,
             siteId: siteObjectId,
@@ -296,9 +257,17 @@ export class AutonomousPipelineService {
             wordCount: articleResult.wordCount,
             readingTime: Math.ceil(articleResult.wordCount / 200),
             aiGenerated: true,
-            tags: wordpressTags,
           });
           await content.save();
+
+          // Deduct word credits — same pattern as content.routes.ts
+          await User.findByIdAndUpdate(config.userId, {
+            $inc: {
+              wordCredits: -articleResult.creditsUsed,
+              totalWordsUsed: articleResult.wordCount,
+            },
+          });
+          logger.info(`Credits deducted: ${articleResult.creditsUsed} for user ${config.userId.toString()}`);
 
           pipelineRun.results.push({ topic: item.title, contentId: content._id as any, status: 'generated' });
           pipelineRun.articlesGenerated += 1;
@@ -321,7 +290,6 @@ export class AutonomousPipelineService {
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
                 featuredImageId,
-                tags: wordpressTags,
               });
 
               if (publishResult.success) {
