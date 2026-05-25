@@ -260,14 +260,20 @@ export class AutonomousPipelineService {
           });
           await content.save();
 
-          // Deduct word credits — same pattern as content.routes.ts
-          await User.findByIdAndUpdate(config.userId, {
-            $inc: {
-              wordCredits: -articleResult.creditsUsed,
-              totalWordsUsed: articleResult.wordCount,
-            },
-          });
-          logger.info(`Credits deducted: ${articleResult.creditsUsed} for user ${config.userId.toString()}`);
+          // Deduct word credits using the model's own method — handles
+          // subscriptionWordBalance → topupWordBalance → wordCredits priority,
+          // currentMonthUsage, and wordUsageHistory correctly.
+          const user = await User.findById(config.userId);
+          if (user) {
+            await user.deductWordCredits(
+              articleResult.creditsUsed,
+              content._id?.toString(),
+              'generation'
+            );
+            logger.info(`Credits deducted: ${articleResult.creditsUsed} for user ${config.userId.toString()} (remaining: ${user.wordCredits})`);
+          } else {
+            logger.warn(`Could not find user ${config.userId.toString()} to deduct credits`);
+          }
 
           pipelineRun.results.push({ topic: item.title, contentId: content._id as any, status: 'generated' });
           pipelineRun.articlesGenerated += 1;
