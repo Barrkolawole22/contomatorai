@@ -36,8 +36,15 @@ async function aiRelevanceCheck(
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      generationConfig: { maxOutputTokens: 50, temperature: 0 },
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        maxOutputTokens: 100,
+        temperature: 0,
+        // Disable thinking — this is a simple YES/NO classification task.
+        // Without this, 2.5-flash exhausts the token budget on internal
+        // reasoning and outputs nothing, causing every check to default to NO.
+        thinkingConfig: { thinkingBudget: 0 },
+      } as any,
     });
 
     const prompt = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
