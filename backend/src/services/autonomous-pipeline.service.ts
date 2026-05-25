@@ -40,20 +40,24 @@ async function aiRelevanceCheck(
       generationConfig: { maxOutputTokens: 10, temperature: 0 },
     });
 
-    const prompt = `You are a content relevance filter for a niche website.
+    const prompt = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
 
-Broad topics this pipeline covers: ${relevanceTopics.join(', ')}
-Specific niche keywords for this site: ${niches.join(', ')}
+This website covers: ${relevanceTopics.join(', ')}
+The site's specific content areas include: ${niches.join(', ')}
 
-An article is relevant if it touches on any of the broad topics, any of the specific niche
-keywords, or is clearly about the same subject area as those keywords. Be inclusive rather
-than strict — if there is a reasonable connection, answer YES.
+ANSWER YES if the article is about ANY of the following:
+- The exact topics listed above, or anything clearly related to them
+- People, institutions, policies, or events within those topic areas
+- News, updates, research, or developments in those fields
+- Any article where a reader interested in "${relevanceTopics.join(' or ')}" would find it useful or interesting
 
-Article title: ${title}
-Article description: ${description || '(none)'}
+ANSWER NO only if the article has absolutely no connection to the topics above.
+When in doubt, answer YES.
 
-Is this article relevant?
-Reply with only YES or NO — nothing else.`;
+Article title: "${title}"
+Article description: "${description || '(none)'}"
+
+Reply with only YES or NO.`;
 
     const result = await model.generateContent(prompt);
     const answer = result.response.text().trim().toUpperCase();
