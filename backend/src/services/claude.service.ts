@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
+import type { ContentMode } from './prompt-builder.service';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-5-20251001';
 
@@ -14,7 +15,13 @@ interface GeneratedContent {
 }
 
 interface ContentGenerationOptions {
+  // Primary content mode
+  contentMode?: ContentMode;
+
+  // Legacy fields
   tone?: string;
+  writingStyle?: string;
+
   wordCount?: number;
   targetAudience?: string;
   includeHeadings?: boolean;
@@ -25,7 +32,6 @@ interface ContentGenerationOptions {
   contentIntent?: 'informational' | 'navigational' | 'commercial' | 'transactional';
   customPrompt?: string;
   additionalContext?: string;
-  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
   seoFocus?: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
   callToAction?: string;
   includeStatistics?: boolean;
@@ -61,6 +67,8 @@ export class ClaudeService {
     options: ContentGenerationOptions = {}
   ): Promise<GeneratedContent> {
     if (!this.client) throw new Error('Claude service not available – missing API key');
+
+    logger.info(`Claude generating: mode=${options.contentMode || 'seo_blog'}, words=${options.wordCount || 1500}`);
 
     const targetWordCount = options.wordCount || 1500;
     const maxRetries = 2;
@@ -137,7 +145,12 @@ export class ClaudeService {
     if (!content.includes('<h1>') && !content.includes('<h2>') && !content.includes('<p>')) {
       content = `<h1>${title}</h1>\n\n` + content.split('\n').filter(p => p.trim()).map(p => `<p>${p}</p>`).join('\n');
     }
-    return { title, content: content.trim(), wordCount: this.countWords(content), summary: content.substring(0, 200) + '...' };
+    return {
+      title,
+      content: content.trim(),
+      wordCount: this.countWords(content),
+      summary: content.substring(0, 200) + '...'
+    };
   }
 
   async checkService(): Promise<{ status: string; model: string }> {

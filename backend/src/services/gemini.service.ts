@@ -1,10 +1,9 @@
 // backend/src/services/gemini.service.ts
-// UPDATED VERSION — proper retry-after handling + meta description support
-
 import { GoogleGenerativeAI, Tool } from '@google/generative-ai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
+import type { ContentMode } from './prompt-builder.service';
 
 interface GeneratedContent {
   title: string;
@@ -14,7 +13,13 @@ interface GeneratedContent {
 }
 
 interface ContentGenerationOptions {
+  // Primary content mode
+  contentMode?: ContentMode;
+
+  // Legacy fields
   tone?: string;
+  writingStyle?: string;
+
   wordCount?: number;
   targetAudience?: string;
   includeHeadings?: boolean;
@@ -25,7 +30,6 @@ interface ContentGenerationOptions {
   contentIntent?: 'informational' | 'navigational' | 'commercial' | 'transactional';
   customPrompt?: string;
   additionalContext?: string;
-  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
   seoFocus?: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
   callToAction?: string;
   includeStatistics?: boolean;
@@ -83,11 +87,9 @@ export class GeminiService {
 
     const modelVariant = options.modelVariant || 'flash';
     const modelString = this.MODELS[modelVariant];
-
-    // Only Pro supports grounding
     const enableGrounding = options.enableGrounding && modelVariant === 'pro';
 
-    logger.info(`Using Gemini model: ${modelString}, grounding: ${enableGrounding ? 'on' : 'off'}`);
+    logger.info(`Using Gemini model: ${modelString}, mode: ${options.contentMode || 'seo_blog'}, grounding: ${enableGrounding ? 'on' : 'off'}`);
 
     const targetWordCount = options.wordCount || 1500;
     const maxRetries = 2;
@@ -108,7 +110,6 @@ export class GeminiService {
           enableGrounding ?? false
         );
 
-        // Internal link validation
         if (options.includeInternalLinks && options.internalLinkSuggestions?.length) {
           const validation = promptBuilder.validateInternalLinks(
             content.content,
@@ -164,7 +165,7 @@ export class GeminiService {
         return parseInt(retryAfter, 10) * 1000;
       }
     } catch {
-      // swallow — not critical
+      // swallow
     }
     return 0;
   }
@@ -184,7 +185,6 @@ export class GeminiService {
       maxOutputTokens: 8192,
     };
 
-    // Cast to Tool[] to satisfy SDK's strict union type while preserving runtime shape
     const tools: Tool[] | undefined = enableGrounding
       ? ([{ googleSearch: {} }] as unknown as Tool[])
       : undefined;
@@ -216,19 +216,13 @@ export class GeminiService {
       }
 
       const parsedContent = this.parseContent(generatedText, keyword);
-
       const validationIssues = this.validateContentQuality(parsedContent.content, targetWordCount);
 
       if (validationIssues.length > 0) {
         logger.warn('Content quality issues:', validationIssues);
-
         const criticalIssues = validationIssues.filter(
-          issue =>
-            issue.includes('too short') ||
-            issue.includes('placeholder') ||
-            issue.includes('incomplete')
+          issue => issue.includes('too short') || issue.includes('placeholder') || issue.includes('incomplete')
         );
-
         if (criticalIssues.length > 0) {
           throw new Error(`Content quality failed: ${criticalIssues.join(', ')}`);
         }
@@ -254,15 +248,12 @@ export class GeminiService {
     if (wordCount < targetWordCount * 0.3) {
       issues.push(`Content too short: ${wordCount} words (target: ${targetWordCount})`);
     }
-
     if (content.includes('[continue') || content.includes('[insert')) {
       issues.push('Contains placeholder text');
     }
-
     if (content.includes('&lt;') || content.includes('&gt;') || content.includes('&amp;')) {
       issues.push('Contains broken HTML entities');
     }
-
     if (wordCount < targetWordCount * 0.5) {
       const lastPara = content.trim().split(/\n/).pop() || '';
       const lastText = lastPara.replace(/<[^>]*>/g, '').trim();
@@ -313,10 +304,7 @@ export class GeminiService {
 
   private countWords(text: string): number {
     const plainText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-    return plainText
-      .trim()
-      .split(/\s+/)
-      .filter(word => word.length > 0).length;
+    return plainText.trim().split(/\s+/).filter(word => word.length > 0).length;
   }
 
   private parseContent(generatedText: string, keyword: string): GeneratedContent {
@@ -341,10 +329,7 @@ export class GeminiService {
     }
 
     const plainText = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
-    const words = plainText
-      .trim()
-      .split(/\s+/)
-      .filter(word => word.length > 0);
+    const words = plainText.trim().split(/\s+/).filter(word => word.length > 0);
 
     return {
       title,
@@ -370,12 +355,7 @@ export class GeminiService {
   }
 
   private generateFallbackTitle(keyword: string): string {
-    return (
-      keyword
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ') + ': Complete Guide'
-    );
+    return keyword.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + ': Complete Guide';
   }
 
   private delay(ms: number): Promise<void> {
@@ -383,10 +363,7 @@ export class GeminiService {
   }
 
   async checkService(): Promise<{ status: string; model: string }> {
-    if (!this.genAI) {
-      throw new Error('Gemini service not initialized');
-    }
-
+    if (!this.genAI) throw new Error('Gemini service not initialized');
     try {
       const model = this.genAI.getGenerativeModel({ model: this.MODELS.flash });
       const result = await model.generateContent('Test');

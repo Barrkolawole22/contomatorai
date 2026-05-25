@@ -22,16 +22,6 @@ const MAX_TAGS = 10;
 // e.g. target=2, multiplier=10 → fetch up to 20 candidates, stop generating once 2 pass the gate.
 const RSS_FETCH_MULTIPLIER = 10;
 
-// Generic English words that produce useless Google News results when used as search queries.
-// These are kept in the niches array for tagging/linking but excluded from RSS fetching.
-const RSS_STOPWORDS = new Set([
-  'free', 'download', 'complete', 'guide', 'tips', 'best', 'top', 'new',
-  'latest', 'update', 'news', 'info', 'learn', 'study', 'read', 'get',
-  'find', 'search', 'application', 'recruitment', 'form', 'register',
-  'registration', 'check', 'result', 'results', 'answer', 'answers',
-  'past', 'pdf', 'online', 'click', 'here', 'questions', 'question',
-]);
-
 /**
  * Ask Gemini Flash: is this article relevant to the configured topics?
  * Returns true (proceed) or false (skip). Fast + cheap — ~10 tokens output.
@@ -151,17 +141,13 @@ export class AutonomousPipelineService {
         return;
       }
 
-      // Filter out generic words before using niches as RSS search queries.
-      // They stay in `niches` for tagging/linking but won't pollute news results.
-      const rssNiches = niches.filter(n => !RSS_STOPWORDS.has(n.toLowerCase()));
-      const fetchNiches = rssNiches.length > 0 ? rssNiches : niches;
-
-      // Fetch a large pool so the gate can reject freely and we still hit the target.
+      // Fetch a large pool so the gate can reject freely and still hit the target.
+      // rss.service handles all niche-to-query logic internally — no filtering here.
       const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
-      const rssItems = await rssService.fetchItemsForNiches(fetchNiches, fetchLimit, 24, relevanceTopics);
+      const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics);
 
       if (rssItems.length === 0) {
-        logger.warn(`No RSS items found for niches [${fetchNiches.join(', ')}] -- run aborted`);
+        logger.warn(`No RSS items found for niches [${niches.join(', ')}] -- run aborted`);
         pipelineRun.status = 'completed';
         pipelineRun.completedAt = new Date();
         await pipelineRun.save();
@@ -170,7 +156,7 @@ export class AutonomousPipelineService {
         return;
       }
 
-      logger.info(`Pipeline ${configId}: fetched ${rssItems.length} RSS candidates for niches [${fetchNiches.join(', ')}] (target: ${config.maxArticlesPerRun})`);
+      logger.info(`Pipeline ${configId}: fetched ${rssItems.length} RSS candidates for niches [${niches.join(', ')}] (target: ${config.maxArticlesPerRun})`);
 
       const internalLinks = await this.fetchInternalLinks(siteIdString, niches[0]);
       let articleIndex = 0;
@@ -184,18 +170,20 @@ export class AutonomousPipelineService {
 
         try {
           // ── AI RELEVANCE GATE ─────────────────────────────────────────────
+          // Always runs. Uses relevanceTopics if set, falls back to niches.
+          // This guarantees irrelevant articles are filtered on every pipeline
+          // regardless of whether the user configured explicit relevance topics.
           const meaningfulNiches = niches.filter(n => n.length >= 4);
+          const gateTopics = relevanceTopics.length > 0 ? relevanceTopics : meaningfulNiches;
 
-          if (relevanceTopics.length > 0 && meaningfulNiches.length > 0) {
-            const check = await aiRelevanceCheck(item.title, item.description, relevanceTopics, meaningfulNiches);
+          if (gateTopics.length > 0) {
+            const check = await aiRelevanceCheck(item.title, item.description, gateTopics, meaningfulNiches);
             if (!check.relevant) {
               logger.warn(`AI gate rejected "${item.title}": ${check.reason}`);
               pipelineRun.results.push({ topic: item.title, status: 'skipped', error: check.reason });
               continue;
             }
             logger.info(`AI gate approved "${item.title}"`);
-          } else if (relevanceTopics.length > 0 && meaningfulNiches.length === 0) {
-            logger.warn(`AI gate skipped for "${item.title}" -- no meaningful niche keywords to evaluate against`);
           }
           // ─────────────────────────────────────────────────────────────────
 

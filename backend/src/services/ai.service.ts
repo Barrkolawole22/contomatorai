@@ -3,6 +3,7 @@ import logger from '../config/logger';
 import geminiService from './gemini.service';
 import openaiService from './openai.service';
 import claudeService from './claude.service';
+import type { ContentMode } from './prompt-builder.service';
 
 export type AIModel = 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
 
@@ -27,7 +28,7 @@ export const MODEL_CONFIG = {
     icon: '🌟',
     speed: 'fast',
     quality: 'better',
-    fallback: 'gemini' as AIModel  // fallback when quota exceeded
+    fallback: 'gemini' as AIModel
   },
   gpt4o: {
     label: 'Premium',
@@ -50,7 +51,13 @@ export const MODEL_CONFIG = {
 } as const;
 
 interface GenerationOptions {
+  // Primary content mode — drives structure, voice, and heading style
+  contentMode?: ContentMode;
+
+  // Legacy fields — kept for backward compatibility
   tone?: string;
+  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
+
   wordCount?: number;
   targetAudience?: string;
   includeHeadings?: boolean;
@@ -61,7 +68,6 @@ interface GenerationOptions {
   contentIntent?: 'informational' | 'navigational' | 'commercial' | 'transactional';
   customPrompt?: string;
   additionalContext?: string;
-  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
   seoFocus?: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
   callToAction?: string;
   includeStatistics?: boolean;
@@ -108,13 +114,12 @@ export class AIService {
 
     logger.info(
       `Generating content with ${config.label} (${model}): ` +
-      `${targetWordCount} words, ~${estimatedCredits} credits (${config.creditMultiplier}x multiplier)`
+      `${targetWordCount} words, mode: ${options.contentMode || 'seo_blog'}, ~${estimatedCredits} credits`
     );
 
     try {
       return await this._runGeneration(keyword, model, options, targetWordCount);
     } catch (error: any) {
-      // Fallback logic: if quota error and a fallback model is defined, retry with fallback
       const fallbackModel = (config as any).fallback as AIModel | undefined;
       if (isQuotaError(error) && fallbackModel) {
         logger.warn(`⚠️ ${config.label} quota exceeded — falling back to ${MODEL_CONFIG[fallbackModel].label}`);
