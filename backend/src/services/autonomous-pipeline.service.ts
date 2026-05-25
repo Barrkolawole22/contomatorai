@@ -18,6 +18,20 @@ const PUBLISH_STAGGER_MINUTES = 120;
 const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
 const MAX_TAGS = 10;
 
+// How many RSS items to fetch per run relative to the article target.
+// e.g. target=2, multiplier=10 → fetch up to 20 candidates, stop generating once 2 pass the gate.
+const RSS_FETCH_MULTIPLIER = 10;
+
+// Generic English words that produce useless Google News results when used as search queries.
+// These are kept in the niches array for tagging/linking but excluded from RSS fetching.
+const RSS_STOPWORDS = new Set([
+  'free', 'download', 'complete', 'guide', 'tips', 'best', 'top', 'new',
+  'latest', 'update', 'news', 'info', 'learn', 'study', 'read', 'get',
+  'find', 'search', 'application', 'recruitment', 'form', 'register',
+  'registration', 'check', 'result', 'results', 'answer', 'answers',
+  'past', 'pdf', 'online', 'click', 'here', 'questions', 'question',
+]);
+
 /**
  * Ask Gemini Flash: is this article relevant to the configured topics?
  * Returns true (proceed) or false (skip). Fast + cheap — ~10 tokens output.
@@ -137,10 +151,17 @@ export class AutonomousPipelineService {
         return;
       }
 
-      const rssItems = await rssService.fetchItemsForNiches(niches, config.maxArticlesPerRun);
+      // Filter out generic words before using niches as RSS search queries.
+      // They stay in `niches` for tagging/linking but won't pollute news results.
+      const rssNiches = niches.filter(n => !RSS_STOPWORDS.has(n.toLowerCase()));
+      const fetchNiches = rssNiches.length > 0 ? rssNiches : niches;
+
+      // Fetch a large pool so the gate can reject freely and we still hit the target.
+      const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
+      const rssItems = await rssService.fetchItemsForNiches(fetchNiches, fetchLimit, 24, relevanceTopics);
 
       if (rssItems.length === 0) {
-        logger.warn(`No RSS items found for niches [${niches.join(', ')}] -- run aborted`);
+        logger.warn(`No RSS items found for niches [${fetchNiches.join(', ')}] -- run aborted`);
         pipelineRun.status = 'completed';
         pipelineRun.completedAt = new Date();
         await pipelineRun.save();
@@ -149,12 +170,18 @@ export class AutonomousPipelineService {
         return;
       }
 
-      logger.info(`Pipeline ${configId}: processing ${rssItems.length} RSS item(s) for niches [${niches.join(', ')}]`);
+      logger.info(`Pipeline ${configId}: fetched ${rssItems.length} RSS candidates for niches [${fetchNiches.join(', ')}] (target: ${config.maxArticlesPerRun})`);
 
       const internalLinks = await this.fetchInternalLinks(siteIdString, niches[0]);
       let articleIndex = 0;
 
       for (const item of rssItems) {
+        // Stop as soon as we have generated the target number of articles.
+        if (pipelineRun.articlesGenerated >= config.maxArticlesPerRun) {
+          logger.info(`Pipeline ${configId}: reached target of ${config.maxArticlesPerRun} article(s) -- stopping early`);
+          break;
+        }
+
         try {
           // ── AI RELEVANCE GATE ─────────────────────────────────────────────
           const meaningfulNiches = niches.filter(n => n.length >= 4);
