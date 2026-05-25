@@ -236,7 +236,13 @@ export class AutonomousPipelineService {
             }
           }
 
-          const metaDescription = await this.generateMetaDescription(articleResult.title, articleResult.content);
+          // Strip the opening <h1> — WordPress and the theme already render
+          // the post title as H1. Without this, the page has 3 H1 tags.
+          const cleanedContent = articleResult.content
+            .replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
+            .trim();
+
+          const metaDescription = await this.generateMetaDescription(articleResult.title, cleanedContent);
 
           const staggeredMinutes = config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
           const scheduledDate =
@@ -248,7 +254,7 @@ export class AutonomousPipelineService {
             userId: config.userId,
             siteId: siteObjectId,
             title: articleResult.title,
-            content: articleResult.content,
+            content: cleanedContent,
             excerpt: metaDescription,
             keyword: item.title,
             status: scheduledDate ? 'scheduled' : 'draft',
