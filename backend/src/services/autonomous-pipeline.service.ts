@@ -29,7 +29,8 @@ async function aiRelevanceCheck(
   title: string,
   description: string,
   relevanceTopics: string[],
-  niches: string[]
+  niches: string[],
+  country: string = 'Global'
 ): Promise<{ relevant: boolean; reason: string }> {
   try {
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
@@ -50,6 +51,7 @@ async function aiRelevanceCheck(
 
 This website covers: ${relevanceTopics.join(', ')}
 The site's specific content areas include: ${niches.join(', ')}
+This site focuses on content from: ${country === 'Global' ? 'worldwide sources' : country === 'NG' ? 'Nigeria' : country === 'US' ? 'the United States' : country === 'GB' ? 'the United Kingdom' : country}
 
 ANSWER YES if the article is about ANY of the following:
 - The exact topics listed above, or anything clearly related to them
@@ -57,7 +59,8 @@ ANSWER YES if the article is about ANY of the following:
 - News, updates, research, or developments in those fields
 - Any article where a reader interested in "${relevanceTopics.join(' or ')}" would find it useful or interesting
 
-ANSWER NO only if the article has absolutely no connection to the topics above.
+ANSWER NO if the article has no connection to the topics above, OR if it is clearly about a different country than the one this site focuses on (e.g. reject US news for a Nigerian site).
+Exception: global/international news relevant to the topic is always acceptable.
 When in doubt, answer YES.
 
 Article title: "${title}"
@@ -99,6 +102,7 @@ export class AutonomousPipelineService {
     const siteObjectId = (config.siteId as any)?._id ?? config.siteId;
     const siteIdString = siteObjectId?.toString();
     const relevanceTopics: string[] = (config as any).relevanceTopics || [];
+    const country: string = (config as any).country || 'Global';
     let proQuotaExhausted = false;
 
     try {
@@ -119,7 +123,7 @@ export class AutonomousPipelineService {
       // Fetch a large pool so the gate can reject freely and still hit the target.
       // rss.service handles all niche-to-query logic internally — no filtering here.
       const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
-      const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics);
+      const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics, country as any);
 
       if (rssItems.length === 0) {
         logger.warn(`No RSS items found for niches [${niches.join(', ')}] -- run aborted`);
@@ -152,7 +156,7 @@ export class AutonomousPipelineService {
           const gateTopics = relevanceTopics.length > 0 ? relevanceTopics : meaningfulNiches;
 
           if (gateTopics.length > 0) {
-            const check = await aiRelevanceCheck(item.title, item.description, gateTopics, meaningfulNiches);
+            const check = await aiRelevanceCheck(item.title, item.description, gateTopics, meaningfulNiches, country);
             if (!check.relevant) {
               logger.warn(`AI gate rejected "${item.title}": ${check.reason}`);
               pipelineRun.results.push({ topic: item.title, status: 'skipped', error: check.reason });

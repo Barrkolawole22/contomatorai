@@ -69,6 +69,7 @@ export interface IUser extends Document {
   emailVerificationExpiry?: Date;
 
   avatar?: string;
+  hasSeenTour?: boolean;
   timezone?: string;
   language?: string;
   phone?: string;
@@ -306,6 +307,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
     emailVerificationExpiry: { type: Date, default: undefined },
 
     avatar: { type: String, default: undefined },
+    hasSeenTour: { type: Boolean, default: false },
     timezone: { type: String, default: 'UTC' },
     language: {
       type: String,

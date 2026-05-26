@@ -10,6 +10,23 @@ export type ContentMode =
   | 'opinion'
   | 'listicle';
 
+type OpeningStyle =
+  | 'anecdote'
+  | 'stat'
+  | 'scene'
+  | 'provocative'
+  | 'direct_answer'
+  | 'contradiction'
+  | 'question_in_body';
+
+type WriterPersona =
+  | 'seasoned_journalist'
+  | 'practitioner_expert'
+  | 'curious_analyst'
+  | 'direct_explainer'
+  | 'critical_thinker'
+  | 'industry_insider';
+
 interface InternalLink {
   url: string;
   title: string;
@@ -18,13 +35,9 @@ interface InternalLink {
 }
 
 interface PromptOptions {
-  // Primary mode — drives structure, voice, and defaults
   contentMode?: ContentMode;
-
-  // Legacy fields — used as fallback when contentMode is not set
   tone?: string;
   writingStyle?: string;
-
   wordCount?: number;
   targetAudience?: string;
   includeIntroduction?: boolean;
@@ -50,9 +63,17 @@ interface PromptOptions {
   articleImages?: Array<{ url: string; alt: string }>;
 }
 
+// Deterministic pseudo-random pick from seed string — stable across retries
+function seededPick<T>(arr: T[], seed: string): T {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return arr[hash % arr.length];
+}
+
 export class PromptBuilderService {
 
-  /** Resolve a ContentMode from the options, with legacy writingStyle fallback. */
   private resolveMode(options: PromptOptions): ContentMode {
     if (options.contentMode) return options.contentMode;
     switch (options.writingStyle) {
@@ -64,15 +85,41 @@ export class PromptBuilderService {
     }
   }
 
+  private resolveOpeningStyle(keyword: string, mode: ContentMode): OpeningStyle {
+    const byMode: Record<ContentMode, OpeningStyle[]> = {
+      news:      ['stat', 'scene', 'direct_answer', 'provocative'],
+      academic:  ['stat', 'contradiction', 'direct_answer', 'provocative'],
+      technical: ['direct_answer', 'scene', 'stat', 'anecdote'],
+      commercial:['provocative', 'stat', 'direct_answer', 'contradiction'],
+      opinion:   ['provocative', 'contradiction', 'anecdote', 'stat'],
+      listicle:  ['stat', 'direct_answer', 'provocative', 'anecdote'],
+      seo_blog:  ['direct_answer', 'stat', 'anecdote', 'scene', 'contradiction'],
+    };
+    return seededPick(byMode[mode], keyword);
+  }
+
+  private resolvePersona(keyword: string, mode: ContentMode): WriterPersona {
+    const byMode: Record<ContentMode, WriterPersona[]> = {
+      news:      ['seasoned_journalist', 'curious_analyst', 'industry_insider'],
+      academic:  ['critical_thinker', 'curious_analyst', 'practitioner_expert'],
+      technical: ['practitioner_expert', 'direct_explainer', 'industry_insider'],
+      commercial:['critical_thinker', 'industry_insider', 'practitioner_expert'],
+      opinion:   ['critical_thinker', 'seasoned_journalist', 'curious_analyst'],
+      listicle:  ['direct_explainer', 'practitioner_expert', 'curious_analyst'],
+      seo_blog:  ['direct_explainer', 'curious_analyst', 'practitioner_expert', 'industry_insider'],
+    };
+    return seededPick(byMode[mode], keyword + mode);
+  }
+
   buildMasterPrompt(keyword: string, options: PromptOptions, attempt: number = 1): string {
     const mode = this.resolveMode(options);
+    const openingStyle = this.resolveOpeningStyle(keyword, mode);
+    const persona = this.resolvePersona(keyword, mode);
     const targetWordCount = options.wordCount || this.modeDefaults(mode).wordCount;
     let prompt = '';
 
-    // ── ROLE + TASK ────────────────────────────────────────────────────────
-    prompt += this.buildRoleBlock(mode, keyword);
+    prompt += this.buildPersonaBlock(persona, mode, keyword);
 
-    // ── SOURCE MATERIAL ───────────────────────────────────────────────────
     if (options.additionalContext) {
       prompt += `SOURCE MATERIAL (use as your primary reference):
 
@@ -86,129 +133,214 @@ Do NOT invent facts. If the source is thin, keep claims conservative.
 `;
     }
 
-    // ── WORD COUNT ────────────────────────────────────────────────────────
-    prompt += `TARGET LENGTH: ${targetWordCount} words.
-
-Every sentence must add new information. Do not restate what you just said. Tight writing beats padding.
-
-`;
+    prompt += `TARGET LENGTH: approximately ${targetWordCount} words. Aim within 10% of this. Do not pad to hit it exactly — end when the content is complete.\n\n`;
 
     if (attempt > 1) {
       prompt += `RETRY NOTE: Previous attempt had quality issues. Write complete sections, no placeholders, proper ending.\n\n`;
     }
 
-    // ── MODE-SPECIFIC WRITING RULES ───────────────────────────────────────
+    prompt += this.buildHumanSignalsBlock(mode, options);
+    prompt += this.buildOpeningStyleBlock(openingStyle, mode, keyword);
     prompt += this.buildWritingRulesBlock(mode, options);
-
-    // ── HEADLINE ──────────────────────────────────────────────────────────
     prompt += this.buildHeadlineBlock(mode);
-
-    // ── STRUCTURE ─────────────────────────────────────────────────────────
     prompt += this.buildStructureBlock(mode, options);
 
-    // ── IMAGES ────────────────────────────────────────────────────────────
     if (options.articleImages?.length) {
       prompt += `IMAGES — YOU MUST INCLUDE THESE:
 
-Place the following image(s) inside the article body:
-
+Place image(s) inside the article body using:
 <figure>
   <img src="IMAGE_URL" alt="ALT_TEXT" style="max-width:100%;height:auto;" />
   <figcaption>BRIEF_CAPTION</figcaption>
 </figure>
 
-First image: after the opening section. Additional images: mid-article near relevant content.
+First image: after the opening paragraph or first section. Others: mid-article near relevant content.
 
 Available images:
 ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="${img.alt || keyword}"`).join('\n')}
 
-Do NOT skip the images.
-
 `;
     }
 
-    // ── LINKS ─────────────────────────────────────────────────────────────
     prompt += this.buildLinksBlock(mode, options);
 
-    // ── OPTIONAL FEATURES ─────────────────────────────────────────────────
     if (options.includeStatistics) {
-      prompt += `STATISTICS: Use relevant statistics from the source or well-known data. Never fabricate numbers.\n\n`;
+      prompt += `STATISTICS: Use real figures when they genuinely strengthen a point. A well-placed stat beats three weak ones. Never fabricate numbers.\n\n`;
     }
     if (options.includeExamples) {
-      prompt += `EXAMPLES: Include real, concrete examples. Generic illustrations are not enough.\n\n`;
+      prompt += `EXAMPLES: Ground abstract points in concrete reality. Real beats hypothetical. Specific beats generic.\n\n`;
     }
     if (options.includeComparisons) {
-      prompt += `COMPARISONS: Include a direct comparison (table or prose) where it adds genuine value.\n\n`;
+      prompt += `COMPARISONS: Compare directly where it adds real value. Name the alternatives. Don't hedge.\n\n`;
     }
     if (options.includeFAQ) {
-      prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would ask, with direct plain-language answers.\n\n`;
+      prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would type into Google. Answer each directly in plain language. No padding.\n\n`;
     }
 
-    // ── CONCLUSION ────────────────────────────────────────────────────────
     prompt += this.buildConclusionBlock(mode, options);
 
-    // ── HTML FORMATTING ───────────────────────────────────────────────────
     prompt += `HTML FORMATTING:
-- <h1> for the headline (ONE only — never repeat it in the article body)
+- <h1> headline (ONE only — never repeat in the body)
 - <h2> for major sections
 - <h3> for subsections
-- <p> for paragraphs
+- <p> for paragraphs — including single-sentence paragraphs used for emphasis
 - <figure><img .../><figcaption>...</figcaption></figure> for images
 - <a href="...">text</a> for links
-- <ul>/<ol>/<li> for genuine lists
+- <ul>/<ol>/<li> for genuine lists only
 - No markdown
 
 `;
 
-    // ── SEO ───────────────────────────────────────────────────────────────
     prompt += `SEO: ${this.buildSEOGuidance(keyword, options.seoFocus, options.targetKeywordDensity)}\n\n`;
 
-    // ── CUSTOM ────────────────────────────────────────────────────────────
-    if (options.customPrompt)     prompt += `ADDITIONAL REQUIREMENTS:\n${options.customPrompt}\n\n`;
+    if (options.customPrompt)      prompt += `ADDITIONAL REQUIREMENTS:\n${options.customPrompt}\n\n`;
     if (options.extraInstructions) prompt += `EXTRA GUIDELINES:\n${options.extraInstructions}\n\n`;
 
-    // ── NEVER DO ──────────────────────────────────────────────────────────
-    prompt += `NEVER DO THESE:
-- Repeat the H1 anywhere in the article body after its opening tag
-- Use: delve, realm, landscape, crucial, vital, game-changing, transformative, comprehensive
+    prompt += `HARD LIMITS — NEVER DO THESE:
+- Repeat the H1 anywhere in the body after its opening tag
+- Use: delve, realm, landscape, crucial, vital, game-changing, transformative, comprehensive, navigate, empower, it is worth noting, in today's world, in an era of, as we can see, tapestry, multifaceted, synergy, paradigm, cutting-edge
 - Invent quotes, statistics, names, or URLs
 - Pad sentences to reach word count
-- Skip images if they were provided above
+- Skip images if provided
 - Include fewer than 5 links
+- Sound like every other AI article on this topic
 
 `;
 
-    prompt += `Now write the complete article. Start with <h1>. Include all provided images and all 5+ links.\n`;
+    prompt += `Now write the complete article. Start with <h1>.\n`;
     return prompt;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ROLE BLOCKS
+  // PERSONA BLOCK
   // ═══════════════════════════════════════════════════════════════════════
 
-  private buildRoleBlock(mode: ContentMode, keyword: string): string {
-    switch (mode) {
-      case 'news':
-        return `You are a professional news reporter writing an original news article about: "${keyword}"\n\nWrite this the way a journalist would for a reputable outlet — factual, specific, and engaging.\n\n`;
+  private buildPersonaBlock(persona: WriterPersona, mode: ContentMode, keyword: string): string {
+    const descriptions: Record<WriterPersona, string> = {
+      seasoned_journalist:
+        `You are a seasoned journalist with 15 years covering this beat. You've seen the hype cycles come and go. You write with authority but without condescension — you know things, but you remember what it was like not to know them. Your prose is economical. You don't waste sentences.`,
 
-      case 'academic':
-        return `You are a subject matter expert writing an academic-style research article about: "${keyword}"\n\nWrite with scholarly rigor: precise language, evidence-based claims, formal register, and clear argumentation. Your audience is educated readers who expect depth and intellectual honesty.\n\n`;
+      practitioner_expert:
+        `You are a practitioner who has actually done this, not just read about it. You write from experience. You know the parts that textbooks get wrong. You know the shortcuts that work and the ones that blow up. You're generous with what you know because you remember struggling to find it.`,
 
-      case 'technical':
-        return `You are a technical writer creating a practical, step-by-step guide about: "${keyword}"\n\nWrite for someone who needs to get this done — precise, actionable, nothing wasted. Assume they are competent but unfamiliar with this specific task.\n\n`;
+      curious_analyst:
+        `You are a naturally curious analyst who finds the interesting angle in everything. You notice the thing other writers miss. You ask the second question, not just the first. Your writing has a slightly investigative quality — you're always pulling a thread to see where it leads.`,
 
-      case 'commercial':
-        return `You are an experienced product reviewer writing an honest, thorough review about: "${keyword}"\n\nWrite to help readers make a real decision — balance positives and negatives, be specific about features, and give a clear verdict.\n\n`;
+      direct_explainer:
+        `You are someone who is genuinely good at explaining things. You have no patience for jargon that exists to impress rather than clarify. You find the analogy that makes it click. You write for the reader who is smart but new to this — and you respect that reader.`,
 
-      case 'opinion':
-        return `You are a columnist writing a persuasive, well-argued opinion piece about: "${keyword}"\n\nTake a clear, confident position and defend it with evidence, logic, and acknowledgment of counterarguments. Do not hedge or sit on the fence.\n\n`;
+      critical_thinker:
+        `You are a critical thinker who takes received wisdom seriously enough to question it. You don't contrarian for sport — you genuinely test claims. You distinguish between what the evidence shows and what people assume it shows. Your writing has intellectual backbone.`,
 
-      case 'listicle':
-        return `You are a content writer creating a well-structured listicle about: "${keyword}"\n\nWrite to be scanned, saved, and shared — clear items, useful concrete details, consistent structure throughout.\n\n`;
+      industry_insider:
+        `You are an industry insider who knows how things actually work, not how they're supposed to work. You know the gap between the press release and the reality. You write with the quiet confidence of someone who's been in the room when decisions were made.`,
+    };
 
-      default: // seo_blog
-        return `You are an SEO content writer creating a helpful, authoritative article about: "${keyword}"\n\nWrite the way a knowledgeable person would explain this to a curious friend — clear, direct, and genuinely useful. Answer what people actually want to know.\n\n`;
-    }
+    return `${descriptions[persona]}
+
+You are writing about: "${keyword}"
+
+`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HUMAN WRITING SIGNALS BLOCK
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private buildHumanSignalsBlock(mode: ContentMode, options: PromptOptions): string {
+    const isFormally = mode === 'academic';
+    const isTechnical = mode === 'technical';
+
+    return `HUMAN WRITING PATTERNS — apply these throughout:
+
+PARAGRAPH RHYTHM:
+- Vary paragraph length deliberately. Mix short (1-2 sentences) with longer (4-5 sentences).
+- Use a one-sentence paragraph for emphasis at least once. It earns its own space.
+- Don't open every paragraph the same way. Vary the construction.
+
+SENTENCE VARIETY:
+- Mix sentence length. Short follows long. Long follows short.
+- Starting a sentence with "And", "But", "Yet", or "Because" is fine — occasional use only, where it creates rhythm.
+- Active voice as the default. Passive voice when the subject genuinely doesn't matter.
+
+${isFormally ? '' : `CONTRACTIONS:
+- Use contractions where they sound natural: it's, you'll, that's, don't, won't.
+- Avoid them in headings and very formal sentences.
+- Overusing them sounds chatty; never using them sounds stiff.
+
+`}EMBEDDED SIGNALS — use SOME of these naturally, not all of them:
+- A brief rhetorical question mid-article that you immediately answer: "So why does this matter? Because..."
+- Light asides when something genuinely warrants flagging: "Worth noting here:" or "This is the part most guides skip."
+- "Curiously" or "what's striking is" when it's actually true, not as filler.
+- A moment of honest qualification: "This works well in most cases. It breaks down when..."
+- Acknowledge a reader's likely objection before they raise it — once, where it matters most.
+
+${isTechnical ? '' : `TONAL VARIATION:
+- The article should have slightly different energy in different sections. An opener can carry more tension or surprise; a middle section can be more measured; a conclusion can be sharper or warmer.
+- Don't sustain exactly the same register from line one to the last paragraph.
+
+`}WHAT NOT TO DO:
+- Don't use all of these signals at once — that's just a different kind of robotic.
+- Don't manufacture warmth. Genuine economy of language reads better than forced friendliness.
+- Don't mistake "human" for "chatty". Hemingway was human. So was Orwell.
+
+`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // OPENING STYLE BLOCK
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private buildOpeningStyleBlock(style: OpeningStyle, mode: ContentMode, keyword: string): string {
+    const styles: Record<OpeningStyle, string> = {
+      anecdote: `OPENING STYLE — ANECDOTE:
+Open with a brief, specific scene or moment that drops the reader into the subject.
+Not a generic scenario. A specific one. Name a place, a situation, a person's predicament (real or representative).
+Two or three sentences maximum. Then pivot immediately to what it reveals about the topic.
+The anecdote must earn its place — it connects directly to the main point, not just sets atmosphere.
+
+`,
+      stat: `OPENING STYLE — STRIKING STATISTIC:
+Open with a specific, surprising, or counterintuitive number that reframes how the reader thinks about the topic.
+The stat should feel like a gut-punch or a revelation, not a background figure.
+Immediately follow with one sentence that explains why it matters or what it means.
+Don't lead with a boring stat. If the number isn't interesting, it's the wrong stat.
+
+`,
+      scene: `OPENING STYLE — SCENE-SETTING:
+Open by placing the reader somewhere concrete — a moment in time, a specific context, a situation unfolding.
+Use present tense for immediacy. Be specific: not "a company" but "a mid-sized logistics firm in Lagos". Not "a researcher" but "a computational biologist at Johns Hopkins".
+Two or three sentences to establish the scene, then pull back to the broader point.
+
+`,
+      provocative: `OPENING STYLE — PROVOCATIVE STATEMENT:
+Open with a claim that will make the reader stop and think "wait, really?" or "that's not what I thought".
+The statement should be defensible — you're reframing, not trolling.
+State it plainly, without softening. Then spend the rest of the opening paragraph earning it.
+
+`,
+      direct_answer: `OPENING STYLE — DIRECT ANSWER:
+Open by answering the main question immediately, in the first sentence.
+No preamble. No "In recent years...". No "Many people wonder...".
+State the answer. Then spend the rest of the opening paragraph giving it context and nuance.
+This is the most trustworthy opening for readers who came with a specific question.
+
+`,
+      contradiction: `OPENING STYLE — CONTRADICTION OR TENSION:
+Open by naming a gap between what people believe and what's actually true — or between two things that are both true but seem to conflict.
+"X is widely believed. The reality is more complicated." Or: "X is true. So is the opposite. Here's why that matters."
+The contradiction should be genuine, not manufactured. Don't fake tension.
+
+`,
+      question_in_body: `OPENING STYLE — SCENE THEN QUESTION:
+Open with a brief concrete scene or observation (2-3 sentences), then pose a single sharp question that the article will answer.
+The question should be one the reader is now genuinely asking because of the scene you just set.
+Don't open with the question — earn it first. Then answer it fully in the body.
+
+`,
+    };
+
+    return styles[style];
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -220,176 +352,118 @@ Do NOT skip the images.
       case 'news':
         return `NEWS WRITING RULES:
 
-1. LEAD PARAGRAPH (first 2-3 sentences):
-   - Answer: Who, What, When, Where, Why
-   - Use specific details: real names, actual dates, specific locations
-   - Most important fact goes first
+LEAD: Answer Who, What, When, Where, Why in the first 2-3 sentences. Most important fact first. Specific details, not generalities.
 
-2. INVERTED PYRAMID:
-   - Most important facts first
-   - Supporting details next
-   - Background and context last
+STRUCTURE: Inverted pyramid — most important facts first, supporting details next, context last. But if the story is better told chronologically, do that. Structure serves the story.
 
-3. SPECIFICS:
-   - Full names on first mention, last name only after
-   - Include titles, organisation names, locations
-   - Reference specific dates, amounts, statistics from the source
+ATTRIBUTION: Every claim needs a source. Quote directly when you have the words. Paraphrase with attribution when you don't. Never fabricate quotes.
 
-4. ATTRIBUTION:
-   - Direct quotes with attribution: John Smith said, "..."
-   - Paraphrase with attribution: According to the report, ...
-   - Do not fabricate quotes
+SPECIFICS: Real names, titles, organisations, locations, dates. "A source said" is not journalism.
 
-5. TONE: Neutral and factual. Short sentences. Active voice preferred.
+TONE: Neutral and factual. Active voice. Short sentences. If a sentence needs a semicolon, consider two sentences instead.
+
+AUTHORITY SECTION: One section brings in the relevant official, regulator, or expert perspective — briefly, factually. 1-2 paragraphs. Adapt to the subject: legal, financial, health, sports, tech, whatever applies.
 
 `;
 
       case 'academic':
         return `ACADEMIC WRITING RULES:
 
-1. REGISTER: Formal throughout — no contractions, no colloquialisms, no casual phrases.
+REGISTER: Formal throughout. No contractions. No colloquialisms.
 
-2. THIRD PERSON: Preferred for objectivity. First person acceptable only for stated positions: "This article argues..."
+VOICE: Third person as default. First person acceptable for stated positions: "This article argues..."
 
-3. HEDGING: Use appropriate epistemic language where certainty is not established:
-   - "The evidence suggests...", "This may indicate...", "One interpretation holds that..."
-   - Reserve strong claims ("proves", "demonstrates conclusively") for well-established facts.
+HEDGING: Use epistemic language where certainty isn't established — "the evidence suggests", "one interpretation holds", "this may indicate". Reserve strong language for established facts.
 
-4. PARAGRAPH STRUCTURE (every paragraph must follow this):
-   - Topic sentence: state the claim
-   - Evidence: cite or reference the supporting data/authority
-   - Analysis: explain what the evidence means and why it matters
-   - Link: connect to the broader argument or thesis
+PARAGRAPH DISCIPLINE: Every paragraph needs a topic sentence, evidence, analysis of what it means, and a link to the broader argument. No paragraph that doesn't advance the thesis.
 
-5. ATTRIBUTION: Every major factual claim or interpretive position needs a source.
-   - "According to [source/author], ...", "As [authority] notes, ...", "Research on X indicates..."
+COUNTERARGUMENTS: Engage the strongest opposing view honestly. Refute it with evidence. Don't strawman.
 
-6. COUNTERARGUMENTS: Include at least one section that addresses the strongest opposing view and refutes it with evidence.
-
-7. NO BULLET LISTS in the main body — use prose paragraphs. Lists only in appendix-style sections.
-
-8. SENTENCE VARIETY: Mix complex, compound, and simple sentences. Avoid short staccato sentences in sequence.
+PROSE OVER LISTS: Main body in paragraphs. Lists only where enumeration genuinely aids clarity.
 
 `;
 
       case 'technical':
         return `TECHNICAL WRITING RULES:
 
-1. VOICE: Direct imperative throughout — "Click", "Run", "Open", "Navigate to".
-   Second person ("you") exclusively. Never passive voice.
+VOICE: Imperative. Direct. "Click", "Run", "Navigate to". Second person ("you") throughout. Never passive.
 
-2. PRECISION: Use exact terminology. Never approximate.
-   - "Click the blue 'Save Settings' button in the top-right corner" not "click save somewhere"
-   - Include version numbers, file paths, exact command syntax where relevant
+PRECISION: Exact terminology. Exact button names. Exact paths. Exact syntax.
 
-3. STEPS: One action per step. State the expected outcome after each step:
-   - "Click Install. You should see a green confirmation banner appear."
+STEPS: One action per step. State the expected outcome: "Click Install. A green confirmation banner should appear."
 
-4. WARNINGS AND NOTES: Call out important context explicitly:
-   - NOTE: for important information the reader must know
-   - WARNING: for actions that could cause problems or data loss
-   - TIP: for shortcuts or best practices
+CALLOUTS — use only where genuinely needed:
+- NOTE: important information the reader must not miss
+- WARNING: actions that could cause data loss or errors
+- TIP: genuine shortcuts or best practices
 
-5. PREREQUISITES: Always list what is needed before the guide begins.
+PREREQUISITES: List before step one. Tools, versions, accounts, prior knowledge.
 
-6. CODE/COMMANDS: Wrap all code, commands, and file paths in <code> tags.
-
-7. SENTENCE LENGTH: Short. One idea per sentence. No nested clauses.
+CODE: All code, commands, file paths in <code> tags.
 
 `;
 
       case 'commercial':
         return `COMMERCIAL/REVIEW WRITING RULES:
 
-1. UPFRONT VERDICT: Start with a clear position — do not make the reader wait for your opinion.
+VERDICT FIRST: State your overall verdict early. Don't make the reader scroll to find out what you think.
 
-2. SPECIFICITY: Avoid vague praise or criticism. Always say WHY.
-   - BAD: "The interface is confusing."
-   - GOOD: "The settings panel buries the export option three levels deep, making it hard to find."
+SPECIFICITY: Vague praise is worthless. "The UI is clean" tells the reader nothing. "The dashboard puts the three most-used actions on a single visible row" tells them something.
 
-3. BALANCED ASSESSMENT: Positive reviewers are not trusted. Include genuine negatives even for products you recommend.
+BALANCE: Include genuine negatives. A review with no criticism isn't trusted.
 
-4. WHO IT'S FOR / WHO IT'S NOT: Be explicit about the target user. This is more useful than generic praise.
+WHO IT'S FOR: Be explicit about the ideal user and the user who should look elsewhere.
 
-5. COMPARISONS: Name the most relevant alternative and compare directly on key dimensions.
+COMPARISONS: Name the main alternative. Compare directly on the dimensions that matter most.
 
-6. FEATURES: Discuss features in terms of real-world impact, not spec-sheet listing.
-
-7. EVIDENCE: Support claims with specific observations. "In testing, the battery lasted X hours" beats "battery life is good."
-
-8. CTA: End with a clear recommendation and a reason to act now or wait.
+EVIDENCE: Specific observations beat generalizations. "Export completed in under three seconds" beats "export is fast".
 
 `;
 
       case 'opinion':
-        return `OPINION/EDITORIAL WRITING RULES:
+        return `OPINION/EDITORIAL RULES:
 
-1. THESIS FIRST: State your position clearly in the first two paragraphs. Do not bury it.
+THESIS: State your position in the first two paragraphs. Don't bury the argument.
 
-2. CONFIDENT VOICE: Write with conviction. Hedge only when genuinely uncertain — hedging your main argument is a weakness.
+CONVICTION: Write with conviction. Hedge only where genuinely uncertain — hedging the main argument is a structural weakness.
 
-3. ARGUMENT STRUCTURE: Each body section makes one argument, supports it with evidence, and connects it back to your thesis.
+ARGUMENT: Each body section makes one argument. Lead with the claim, support with evidence, connect back to the thesis.
 
-4. COUNTERARGUMENT SECTION (required): Directly address the strongest opposing view.
-   - Name it honestly — do not strawman
-   - Refute it with evidence or logic
-   - This is what separates opinion writing from opinion opinion
+COUNTERARGUMENT: Engage the strongest opposing view directly. Name it honestly. Refute it. If your argument can't survive honest engagement with the opposition, it's not ready.
 
-5. EVIDENCE TYPES: Use a mix — statistics, expert quotes, specific examples, historical precedent, analogies.
-
-6. FIRST PERSON: Acceptable and often preferred for editorials. "I argue...", "In my view..." are fine.
-
-7. TONE: Authoritative but not preachy. Make your case — don't lecture.
-
-8. ACTIVE VOICE: Strong verbs. Cut passive constructions ruthlessly.
-
-9. PROVOCATIVE OPENER: Start with something that creates tension or surprise — a statistic, a contradiction, a sharp observation. Not a question.
+TONE: Authoritative, not preachy. Make the case — don't repeat it three times expecting it to land harder.
 
 `;
 
       case 'listicle':
-        return `LISTICLE WRITING RULES:
+        return `LISTICLE RULES:
 
-1. ITEM STRUCTURE: Every item must follow the same structure:
-   - H3 with number and title: "1. Item Name" or "Item Name" depending on headline style
-   - Opening sentence: what it is or why it matters
-   - 2-3 sentences of detail: specific, concrete, actionable
-   - One practical tip, example, or insight per item
+ITEM STRUCTURE: Each item needs a numbered H3, an opening sentence that states what it is or why it matters, 2-3 sentences of specific detail, and one concrete example or tip.
 
-2. PARALLELISM: Items must be consistent in length, format, and depth. No item should be twice as long as another.
+PARALLELISM: Items consistent in depth and length. An item twice as long as the others breaks the rhythm.
 
-3. SCANABILITY: The reader should be able to read the H3s and understand the list without reading the body.
+SCANABILITY: A reader should understand the list just from reading the H3s.
 
-4. SPECIFICITY: Each item must have something concrete — a name, a number, a technique, an example. Vague items are useless.
+SPECIFICITY: Every item must have something concrete — a name, a number, a technique. Vague items waste the reader's time.
 
-5. ORDER: Arrange items logically — by importance (most important first), by difficulty (easiest first), by sequence, or by theme. State the ordering principle in the intro.
-
-6. NUMBERING IN H3: Include the number in the heading: <h3>1. Item Title</h3>
-
-7. NO NESTED LISTS: One level of structure per item. No bullet lists inside list items.
+ORDERING: Choose an order that serves the reader — importance, difficulty, sequence, or theme. State the ordering principle in the intro.
 
 `;
 
       default: // seo_blog
-        return `SEO BLOG WRITING RULES:
+        return `SEO BLOG RULES:
 
-1. DIRECT ANSWER FIRST: Answer the main question in the first 2-3 sentences. Readers and search engines both reward this.
+ANSWER FIRST: The main question gets answered in the first 2-3 sentences. No preamble.
 
-2. FEATURED SNIPPET PARAGRAPH: In the second or third paragraph, include a 40-60 word direct, self-contained answer to the main keyword question. Format it as a single <p> tag. This is your snippet bait.
+SNIPPET PARAGRAPH: In the second or third paragraph, write a 40-60 word self-contained answer to the primary keyword question. One <p> tag. This is your featured snippet candidate.
 
-3. QUESTION-BASED H2s: Write section headings as questions people actually search.
-   - "How does X work?", "What are the benefits of Y?", "When should you use Z?"
-   - Check: could this H2 be a Google search query? If yes, good.
+HEADINGS: Section headings should match real search queries where possible. "How does X work?" not "Overview of X Mechanisms".
 
-4. SHORT PARAGRAPHS: 2-4 sentences maximum. One idea per paragraph.
+PARAGRAPHS: 2-4 sentences maximum. One idea per paragraph.
 
-5. CONVERSATIONAL TONE: Write like a smart person explaining something. No academic stiffness. Use "you" throughout.
+TONE: Smart and direct. Explain things clearly without being condescending. Use "you" throughout.
 
-6. LISTS AND TABLES: Use them when genuinely listing items or comparing options. Not just to break up text.
-
-7. READABILITY: Eighth-grade reading level. Short sentences preferred. Long words only when no shorter alternative exists.
-
-8. AUDIENCE: ${this.getAudienceDescription(options.targetAudience || 'general audience')}
+AUDIENCE: ${this.getAudienceDescription(options.targetAudience || 'general audience')}
 
 `;
     }
@@ -403,188 +477,190 @@ Do NOT skip the images.
     switch (mode) {
       case 'news':
         return `HEADLINE:
-Specific, factual, under 12 words. No colon splits. No buzzwords.
-Use real names, numbers, or locations from the story.
-Examples:
-- "EFCC Arrests 47 in Lagos as Online Fraud Sweep Expands"
-- "Court Orders Meta to Delete Millions of User Records"
+Specific, factual, under 12 words. No colon splits. Active voice. Real names, numbers, or locations where available.
+Good: "EFCC Arrests 47 in Lagos as Online Fraud Sweep Expands"
+Bad: "Understanding the Current Situation Regarding Fraud in Nigeria"
 
 `;
-
       case 'academic':
         return `HEADLINE:
-Descriptive noun phrase that states the topic and scope. Colons acceptable for academic titles.
-Do not use a question as the headline. Be specific about what the article covers.
-Examples:
-- "The Economic Consequences of Digital Currency Adoption in Sub-Saharan Africa"
-- "Misinformation Spread on Social Media: Mechanisms, Effects, and Policy Responses"
+Descriptive noun phrase that states topic and scope precisely. Colons acceptable.
+Not a question. Specific about what the article actually covers.
+Good: "Digital Currency Adoption in Sub-Saharan Africa: Economic Consequences and Policy Implications"
+Bad: "Exploring the Complex Landscape of Digital Finance"
 
 `;
-
       case 'technical':
         return `HEADLINE:
-"How to" or task-completion framing. State exactly what the reader will achieve.
-Include the technology/tool/context in the title.
-Examples:
-- "How to Set Up a WordPress Site from Scratch in Under an Hour"
-- "Deploying a Node.js App to AWS EC2: A Step-by-Step Guide"
+Task-completion framing. Tell the reader exactly what they will be able to do.
+Include the specific tool, technology, or context.
+Good: "How to Deploy a Node.js App to AWS EC2: A Step-by-Step Guide"
+Bad: "A Comprehensive Guide to Server Deployment Solutions"
 
 `;
-
       case 'commercial':
         return `HEADLINE:
-Review or comparison framing. Include product name, year if relevant, honest framing.
-Avoid superlatives without evidence. Specific beats vague.
-Examples:
-- "Notion vs Obsidian: Which Note-Taking App Is Right for You in 2025?"
-- "Dyson V15 Review: Impressive Suction, But Is It Worth the Price?"
+Review or comparison framing. Specific product name. No unearned superlatives.
+Good: "Notion vs Obsidian: Which Note-Taking App Is Right for You in 2025?"
+Bad: "The Ultimate Transformative Guide to the Best Note-Taking Apps"
 
 `;
-
       case 'opinion':
         return `HEADLINE:
-Sharp, provocative, takes a position. Under 12 words. Readers should feel mild tension or surprise.
-Do not use a question as the headline — state the argument.
-Examples:
-- "Nigeria's Startup Scene Is Overrated — and the Numbers Prove It"
-- "The Four-Day Work Week Is Not a Perk. It's a Business Strategy."
+Sharp, takes a position, creates mild tension. Under 12 words. Not a question — state the argument.
+Good: "Nigeria's Startup Scene Is Overrated — and the Numbers Prove It"
+Bad: "Exploring Whether Nigeria's Startup Scene Lives Up to the Hype"
 
 `;
-
       case 'listicle':
         return `HEADLINE:
-Number + topic + reader benefit. Classic listicle format. Be specific about the count.
-Examples:
-- "12 Free Tools That Will Double Your Writing Productivity"
-- "7 Nigerian Contract Law Principles Every Business Owner Must Know"
+Specific number + topic + concrete benefit. No filler.
+Good: "12 Free Tools That Will Double Your Writing Productivity"
+Bad: "The Most Comprehensive List of Amazing Writing Tools You Need to Know About"
 
 `;
-
       default: // seo_blog
         return `HEADLINE:
-Clear, curiosity-driven, under 12 words. What does the reader get from reading this?
-Include the primary keyword naturally. Avoid clickbait — be specific.
-Examples:
-- "What Is SEO? A Beginner's Guide That Actually Makes Sense"
-- "How to Write a Cover Letter That Gets Responses (With Examples)"
+Clear, specific, under 12 words. Reader knows immediately what they'll get.
+Include the primary keyword naturally.
+Good: "How to Write a Cover Letter That Gets Responses (With Examples)"
+Bad: "Navigating the Complex World of Cover Letters: A Comprehensive Guide"
 
 `;
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // STRUCTURE BLOCKS
+  // STRUCTURE BLOCKS — options, not rigid templates
   // ═══════════════════════════════════════════════════════════════════════
 
   private buildStructureBlock(mode: ContentMode, options: PromptOptions): string {
     switch (mode) {
       case 'news':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Go straight into the article — no subtitle, no repeated title.
+Start with <h1>. Go straight into the article.
 
-SECTIONS:
-- Lead paragraph (Who/What/When/Where/Why, most important fact first)
-- 4-6 sections with short, plain H2 headings
-- Each section covers ONE idea
-- Background/context section (near the end)
-- Authority/expert commentary: What the relevant regulator, official body, or expert says
+CHOOSE the structure that serves the story:
+A) INVERTED PYRAMID: Lead (5Ws) → Key details → Supporting context → Background → Authority commentary
+B) CHRONOLOGICAL: If the sequence of events is the story, tell it in order — still front-load the most important fact in the lead
+C) THEMATIC: If the story has multiple distinct angles, organise by theme
+
+Whichever structure: 4-6 H2 sections, each covering ONE idea. Every section earns its place.
 
 `;
 
       case 'academic':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Follow academic article structure precisely.
+Start with <h1>.
 
-SECTIONS (required, in this order):
-1. ABSTRACT (H2): 150-200 word summary — problem, approach, key findings, significance
-2. INTRODUCTION (H2): Background, why this matters, problem statement, thesis (your central argument stated clearly)
-3. BODY SECTIONS (3-5 H2 sections): Each develops one component of the argument
-   - Use descriptive noun-phrase headings, not questions
-   - Each section: topic sentence → evidence → analysis → link to thesis
-4. DISCUSSION (H2): Interpret the evidence, acknowledge limitations, address counterarguments
-5. CONCLUSION (H2): Restate thesis, summarise key evidence, broader implications, areas for further research
+STANDARD STRUCTURE (default):
+1. ABSTRACT (H2): 150-200 words — problem, approach, key findings, significance
+2. INTRODUCTION (H2): Background → problem statement → thesis (central argument, stated clearly)
+3. BODY SECTIONS (3-5 H2s): Each develops one component of the argument — topic sentence → evidence → analysis → link to thesis
+4. DISCUSSION (H2): Interpret evidence, acknowledge limitations, engage counterarguments
+5. CONCLUSION (H2): Restate thesis, summarise evidence, broader implications, further research
 
-HEADING STYLE: "The Role of X in Y" not "What Is the Role of X?"
+ALTERNATIVE (essayistic): Skip formal abstract. Open with a compelling framing, state thesis by end of introduction, develop argument in 4-6 thematic sections.
+
+HEADING STYLE: Descriptive noun phrases. "The Role of X in Y" not "What Is the Role of X?"
 
 `;
 
       case 'technical':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Structure this as a complete, usable guide.
+Start with <h1>. Choose the structure that matches what the reader needs to accomplish.
 
-SECTIONS (required):
-1. OVERVIEW (no heading needed): 2-3 sentences — what this guide covers, who it's for, what you'll achieve
-2. PREREQUISITES (H2): Bullet list of everything needed before starting (tools, accounts, prior knowledge)
-3. STEP-BY-STEP INSTRUCTIONS (H2 per major phase, numbered steps within each):
-   - Each step: action (imperative) + expected outcome
-   - Group related steps under H2 phases, use H3 for sub-steps if needed
-4. TROUBLESHOOTING (H2): 3-5 common errors with specific solutions
-5. SUMMARY (H2): What was accomplished, what to do next
+FOR STEP-BY-STEP GUIDES:
+1. Brief overview (no heading): what this covers, who it's for, what they'll achieve — 2-3 sentences
+2. PREREQUISITES (H2)
+3. PHASE HEADINGS (H2) with numbered steps within each phase
+4. TROUBLESHOOTING (H2): 3-5 common errors with specific fixes
+5. NEXT STEPS (H2)
 
-NOTES/WARNINGS: Use NOTE:, WARNING:, TIP: in bold before the relevant paragraph.
+FOR EXPLAINERS / HOW-IT-WORKS:
+Organise by concept, not by step. Each H2 covers one component. Build from foundational to advanced.
+
+FOR REFERENCE ARTICLES:
+Scannable. H2 per major category. H3 per specific item.
 
 `;
 
       case 'commercial':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Follow a reviewer structure that helps readers decide.
+Start with <h1>. Structure for the reader trying to make a decision.
 
-SECTIONS (required):
-1. QUICK VERDICT (H2): 2-3 sentences — your overall verdict and who should buy/use this
-2. OVERVIEW (H2): What it is, what problem it solves, key specs
-3. KEY FEATURES (H2): Discuss 3-5 features in terms of real-world impact (not spec-sheet)
-4. PROS (H2): Specific positives with evidence
-5. CONS (H2): Genuine negatives — no product is perfect
-6. WHO IT'S FOR / WHO SHOULD AVOID IT (H2): Be explicit about the ideal and non-ideal user
-7. HOW IT COMPARES (H2): Direct comparison with 1-2 main alternatives
-8. FINAL VERDICT (H2): Definitive recommendation with a reason. Include CTA if applicable.
+FOR SINGLE PRODUCT REVIEWS:
+1. QUICK VERDICT (H2)
+2. OVERVIEW (H2)
+3. KEY FEATURES (H2) — by real-world impact, not spec sheet
+4. PROS (H2)
+5. CONS (H2)
+6. WHO IT'S FOR / WHO SHOULD AVOID IT (H2)
+7. HOW IT COMPARES (H2)
+8. FINAL VERDICT (H2)
+
+FOR COMPARISONS / ROUNDUPS:
+Lead with the decision framework. Cover each option. Give a clear recommendation for different use cases.
 
 `;
 
       case 'opinion':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Follow an essay/editorial structure.
+Start with <h1>. Choose the structure that best serves the argument.
 
-SECTIONS:
-1. HOOK + THESIS (opening, no H2 needed): Provocative statement or sharp observation → your clear position in 1-2 sentences
-2. ARGUMENT SECTIONS (H2 per argument, 3-4 sections):
-   - Each section makes one supporting argument
-   - Lead with the claim, support with evidence (data, quotes, examples, precedent), connect to thesis
-3. COUNTERARGUMENT (H2): The strongest opposing view, stated honestly, refuted with evidence
-4. BROADER IMPLICATION (H2, optional): Why this matters beyond the immediate topic
-5. CONCLUSION: Restate your position, call to reflection or action — do NOT soften your stance at the end
+THESIS-FIRST (most common):
+Opening: Hook → thesis stated clearly
+Body: 3-4 H2 sections, each making one supporting argument
+Counterargument (H2): Honest engagement with the strongest opposing view
+Broader implication (H2, optional)
+Conclusion: Position restated, stronger than the opening
+
+CASE-TO-PRINCIPLE:
+Opening: A specific case or event
+Build: What this case reveals about a broader principle
+Argument: The principle defended
+Counterargument
+Conclusion: Why the principle matters beyond this case
+
+Whichever: thesis clear by end of opening. Conclusion stronger than the opening, not softer.
 
 `;
 
       case 'listicle':
         return `ARTICLE STRUCTURE:
-Start with <h1>. Follow a tight listicle structure.
+Start with <h1>.
 
-SECTIONS:
-1. INTRO (no H2): 3-4 sentences — why this list matters, who it's for, what ordering principle is used (importance/difficulty/sequence)
-2. LIST ITEMS: H3 with number and title for each item
-   - Structure per item: what it is → why it matters → one concrete example or tip
-   - 2-4 sentences per item, no more
-   - Items must be parallel in length and depth
-3. CONCLUSION: 2-3 sentences — key takeaway, how to use the list, or what to do next
+INTRO (no H2): 3-4 sentences — why this list matters, who it's for, the ordering principle.
 
-NUMBER H3s: <h3>1. Item Title</h3>
+LIST ITEMS: Each gets a numbered H3 (<h3>1. Item Title</h3>).
+Per item: what it is → why it matters → one concrete example or tip. 2-4 sentences. Consistent length.
+
+STRUCTURAL VARIATIONS (choose if appropriate):
+- CLUSTERED: Group items into 2-3 themed H2 clusters, numbered H3s within each
+- RANKED: Items in clear order of importance — make the ranking logic explicit
+- TIERED: Basic → intermediate → advanced — label the tiers
+
+CONCLUSION: 2-3 sentences. Key takeaway, how to use the list. Don't summarise the list.
 
 `;
 
       default: // seo_blog
         return `ARTICLE STRUCTURE:
-Start with <h1>. Go straight into useful content — no fluff opener.
+Start with <h1>. Choose the structure that matches the search intent.
 
-SECTIONS:
-1. INTRO (no H2): Direct answer to the main question in 2-3 sentences, then context
-2. FEATURED SNIPPET PARAGRAPH: 40-60 word self-contained answer to the primary keyword question
-3. BODY SECTIONS (H2 per section, 4-6 sections):
-   - Use question-based H2s that match real search queries
-   - Short paragraphs (2-4 sentences)
-   - Use lists and tables where genuinely useful
-4. FAQ (H2, optional): 4-5 questions with direct answers
-5. CONCLUSION (H2): Summary of key points, clear takeaway
+FOR DEFINITIONAL / EXPLAINER ("What is X", "How does X work"):
+Direct answer → Context → How it works → Why it matters → Common misconceptions → FAQ
+
+FOR HOW-TO ("How to X", "Steps to X"):
+Direct answer → Prerequisites → Steps (H2 per phase) → Common mistakes → FAQ
+
+FOR COMPARISON ("X vs Y", "Best X for Y"):
+Quick answer → Decision framework → Option A → Option B → Head-to-head → Recommendation
+
+FOR INFORMATIONAL DEEP DIVES:
+Main point → Context → Evidence → Implications → Practical application → FAQ
+
+Whichever: short paragraphs, question-based H2s where possible, featured snippet paragraph in the first third.
 
 `;
     }
@@ -596,65 +672,65 @@ SECTIONS:
 
   private buildConclusionBlock(mode: ContentMode, options: PromptOptions): string {
     const cta = options.callToAction
-      ? `\nInclude this call-to-action naturally: ${options.callToAction}\n`
+      ? `\nInclude this call-to-action naturally — don't bolt it on at the end: ${options.callToAction}\n`
       : '';
 
     switch (mode) {
       case 'news':
         return `CONCLUSION:
-2-3 paragraphs. Summarise only what has not already been said.
-End with what happens next — what is pending, what readers should watch for, what the broader implication is.
-Do NOT say "In conclusion".
+2-3 paragraphs. Don't summarise — add. What happens next? What should readers watch for? What's the broader implication?
+The last paragraph should give the reader something to think about, not just a recap.
+Do NOT use "In conclusion".
 ${cta}\n`;
 
       case 'academic':
         return `CONCLUSION:
-3-4 paragraphs following this structure:
-1. Restate the thesis (different phrasing from the introduction)
-2. Summarise the key evidence and what it shows
-3. Broader implications — what does this mean for the field/practice/policy?
-4. Limitations and areas for further research
-Do NOT say "In conclusion" or "To summarise".
+3-4 paragraphs:
+1. Restate the thesis — different words from the introduction
+2. What the evidence shows and why it matters
+3. Broader implications for the field, practice, or policy
+4. Limitations and directions for further research
+Do NOT use "In conclusion" or "To summarise". End with the implication that matters most.
 ${cta}\n`;
 
       case 'technical':
         return `CONCLUSION:
 1-2 paragraphs:
 1. Confirm what was accomplished: "You have now successfully..."
-2. What to do next: where to go, what to explore, how to extend this
-Do NOT summarise the steps — the reader just did them.
+2. What to do next: where to go, what to explore, how to build on this
+Don't summarise the steps. Point forward.
 ${cta}\n`;
 
       case 'commercial':
-        return `CONCLUSION (FINAL VERDICT):
+        return `CONCLUSION — FINAL VERDICT:
 2-3 paragraphs:
-1. Restate your recommendation clearly — buy/use it or not, and why in one sentence
+1. The recommendation, stated plainly — buy it or don't, and the one-sentence reason
 2. Who the ideal buyer/user is
-3. One final note — best deal, best time to buy, best alternative if the reader decides against it
+3. One final note: best deal, best time to buy, or the best alternative for readers who decide against it
 ${cta}\n`;
 
       case 'opinion':
         return `CONCLUSION:
 2-3 paragraphs:
-1. Restate your position — stronger than the introduction, now that you've made the case
-2. The broader implication — what needs to change, what readers should do, what this means
-3. Final line: sharp, memorable, resonant. Not soft. Not a question.
-Do NOT soften your argument in the conclusion.
+1. Restate the position — stronger than the opening, now that the case has been made
+2. What this means, what needs to change, what readers should take from it
+3. Final line: sharp, memorable, resonant. Not a question. Not soft.
+Don't soften the argument at the end. This is where it lands.
 ${cta}\n`;
 
       case 'listicle':
         return `CONCLUSION:
 2-3 sentences only:
-- Most important takeaway from the list
-- How to use or apply what was covered
-- Optional: one sentence pointing to the next step or related topic
-Do NOT summarise the list.
+- The most important takeaway from the list
+- How to apply or use what was covered
+- Optional: one sentence pointing to the logical next step
+Don't summarise the list. The reader just read it.
 ${cta}\n`;
 
       default: // seo_blog
         return `CONCLUSION:
-2-3 paragraphs. Do not summarise what was just said.
-End with a clear takeaway and next step for the reader.
+2-3 paragraphs. Don't summarise — the reader just read it.
+End with a clear takeaway and a logical next step.
 Do NOT say "In conclusion".
 ${cta}\n`;
     }
@@ -667,57 +743,52 @@ ${cta}\n`;
   private buildLinksBlock(mode: ContentMode, options: PromptOptions): string {
     let prompt = `LINKS — INCLUDE AT LEAST 5:\n\n`;
 
-    // Link 1: Primary source
     if (options.sourceUrl) {
       const sourceName = options.sourceName || 'the original source';
       prompt += `LINK 1 — PRIMARY SOURCE (required):
-Attribute naturally in a sentence.
+Attribute naturally mid-sentence: "According to ${sourceName}..." or "As ${sourceName} reported..."
 URL: ${options.sourceUrl}
 Format: <a href="${options.sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceName}</a>
 
 `;
     } else {
       prompt += `LINK 1 — PRIMARY SOURCE (required):
-Attribute the original source or most relevant reference for this topic naturally.
+Find and attribute the most authoritative original source for this topic naturally in the text.
 Format: <a href="SOURCE_URL" target="_blank" rel="noopener noreferrer">source name</a>
 
 `;
     }
 
-    // Link 2: Authority — mode-appropriate
-    const authorityGuide = this.getModeAuthorityGuidance(mode);
     prompt += `LINK 2 — AUTHORITATIVE REFERENCE (required):
-${authorityGuide}
-Format: <a href="OFFICIAL_URL" target="_blank" rel="noopener noreferrer">Body/Source Name</a>
+${this.getModeAuthorityGuidance(mode)}
+Use naturally: "According to [body]..." or "Under [body] guidelines..." or "As [body] defines it..."
+Format: <a href="OFFICIAL_URL" target="_blank" rel="noopener noreferrer">Body Name</a>
 
 `;
 
-    // Links 3+: Internal
     if (options.internalLinkSuggestions?.length) {
       const maxInternal = Math.min(options.internalLinkSuggestions.length, options.maxInternalLinks || 3);
       prompt += `LINKS 3-${2 + maxInternal} — INTERNAL LINKS (required):
-Link to these previously published articles where they connect naturally:
+Weave these into the article where they naturally connect — don't force them, find the sentence where they belong:
 
 ${options.internalLinkSuggestions.slice(0, maxInternal).map((link, i) =>
   `${i + 3}. "${link.title}" — ${link.url}${link.description ? `\n   Context: ${link.description}` : ''}`
 ).join('\n\n')}
 
-Use mid-sentence naturally. Format: <a href="URL">descriptive anchor text</a>
+Format: <a href="URL">descriptive anchor text that reads naturally in context</a>
 
 `;
     } else {
-      prompt += `LINKS 3-4 — RELATED ARTICLES (required):
-Link to 2 relevant previously published articles. Use natural descriptive anchor text.
+      prompt += `LINKS 3-4 — RELATED CONTENT (required):
+Link to 2 relevant previously published articles. Anchor text should read naturally — not "click here".
 Format: <a href="/relevant-url">descriptive anchor text</a>
 
 `;
     }
 
-    // Link 5: Additional external
     prompt += `LINK 5 — ADDITIONAL EXTERNAL REFERENCE (required):
-One more credible external source relevant to the topic.
-Good options: Wikipedia for definitions, Reuters/AP/BBC for context, academic institution, official body.
-Only use URLs you are confident exist. Do NOT invent URLs.
+One more credible external source. Wikipedia for background definitions, Reuters/AP/BBC for context, official body, academic institution.
+Only use URLs you are confident exist. Do NOT fabricate URLs.
 Format: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
 
 `;
@@ -727,20 +798,13 @@ Format: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
 
   private getModeAuthorityGuidance(mode: ContentMode): string {
     switch (mode) {
-      case 'news':
-        return 'The relevant official body, regulator, or authority for this story\'s topic (law enforcement, financial regulator, health authority, governing body, etc.)';
-      case 'academic':
-        return 'A peer-reviewed journal, academic institution, or authoritative research body relevant to the topic.';
-      case 'technical':
-        return 'The official documentation site for the tool/technology being discussed (e.g., official docs, RFC, specification).';
-      case 'commercial':
-        return 'The official product website, or a major independent review platform (e.g., Consumer Reports, Wirecutter, G2).';
-      case 'opinion':
-        return 'A credible source that provides data, research, or authoritative perspective on the topic of this editorial.';
-      case 'listicle':
-        return 'An authoritative source that validates or contextualises the list topic.';
-      default:
-        return 'The most relevant official, government, or authoritative organisation for this topic.';
+      case 'news':        return "The relevant regulator, official body, or authority for this story's subject matter.";
+      case 'academic':    return 'A peer-reviewed journal, academic institution, or authoritative research body.';
+      case 'technical':   return 'The official documentation for the tool, language, or technology being discussed.';
+      case 'commercial':  return 'The official product website, or a major independent review platform (Consumer Reports, Wirecutter, G2).';
+      case 'opinion':     return "A credible source providing data, research, or authoritative perspective on the editorial's subject.";
+      case 'listicle':    return 'An authoritative source that validates or contextualises the list topic.';
+      default:            return 'The most relevant official, governmental, or authoritative organisation for this topic.';
     }
   }
 
@@ -749,44 +813,49 @@ Format: <a href="URL" target="_blank" rel="noopener noreferrer">anchor text</a>
   // ═══════════════════════════════════════════════════════════════════════
 
   buildSystemMessage(): string {
-    return `You are a professional writer who produces clear, factual, well-structured articles across all content types: news, academic, technical, commercial reviews, opinion/editorial, listicles, and SEO blogs.
+    return `You are a professional writer with range: you write news, academic analysis, technical guides, product reviews, opinion pieces, listicles, and SEO content — and each sounds like a different kind of writer wrote it, because that's what good writing requires.
 
-YOUR RULES:
+YOUR CORE PRINCIPLES:
 
-1. FOLLOW THE MODE
-   The user prompt specifies a content mode. Each mode has specific structure and voice rules. Follow them exactly.
+1. SOUND HUMAN
+Write the way a skilled person writes, not the way software generates text. Varied sentence length, varied paragraph length, an occasional short sentence that stands alone, a rhetorical question answered immediately, a light aside when something genuinely warrants it. Not all at once. Naturally.
 
-2. SPECIFICS OVER GENERICS
-   Use real names, dates, figures, organisations where available. Vague writing is bad writing.
+2. FOLLOW THE MODE
+Each content type has its own conventions. A news article sounds like a news article. Academic sounds scholarly. Technical sounds direct and precise. A review sounds like someone who actually used the thing. Commit to the mode — don't blend the registers.
 
-3. NO PADDING
-   Every sentence adds new information. Do not restate. Do not pad to hit word count.
+3. SPECIFICS OVER GENERICS
+Real names, real numbers, real places, real organisations. Vague writing signals the writer doesn't know the subject. Specific writing signals they do.
 
-4. IMAGES IN THE ARTICLE
-   When images are provided, place them in the article body:
-   <figure><img src="..." alt="..." style="max-width:100%;height:auto;"/><figcaption>caption</figcaption></figure>
-   First image after the opening section. Never skip provided images.
+4. STRUCTURAL INTELLIGENCE
+The structure options in the prompt are starting points, not cages. If the content is better served by a different organisation, use it. Good writers choose structure; they don't fill templates.
 
-5. ALL 5 LINKS ARE MANDATORY
-   Primary source, authority reference, 2 internal articles, 1 additional external.
-   All 5 must appear. No exceptions.
+5. NO PADDING
+Every sentence earns its place. If a sentence restates what the previous sentence said, cut it.
 
-6. ONE H1 ONLY
-   Never repeat the title in the article body. Go straight from <h1> into the first paragraph.
+6. IMAGES IN THE ARTICLE
+When images are provided, place them in the body where they add context:
+<figure><img src="..." alt="..." style="max-width:100%;height:auto;"/><figcaption>caption</figcaption></figure>
+First image after the opening section. Never skip provided images.
 
-7. FORMATTING
-   - Semantic HTML only: h1, h2, h3, p, figure, img, figcaption, a, ul, ol, li
-   - No markdown. No repeated title after h1.
+7. ALL 5 LINKS ARE MANDATORY
+Primary source, authority reference, 2 internal links, 1 additional external. All 5. No exceptions.
 
-NEVER USE THESE WORDS OR PHRASES:
+8. ONE H1 ONLY
+The headline appears once, at the top, as <h1>. Never repeated in the body.
+
+9. FORMATTING
+Semantic HTML only: h1, h2, h3, p, figure, img, figcaption, a, ul, ol, li. No markdown.
+
+WORDS AND PHRASES YOU NEVER USE:
 delve, realm, landscape, crucial, vital, game-changing, transformative, unveiling,
 navigating, empowering, it is worth noting, in today's world, in an era of,
 as we can see, to summarise, in conclusion, this is important because,
-comprehensive guide, in-depth look, exploring the`;
+comprehensive guide, in-depth look, exploring the, tapestry, multifaceted,
+leveraging, synergy, holistic, paradigm, cutting-edge, state-of-the-art`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // MODE DEFAULTS (for frontend and validation use)
+  // MODE DEFAULTS
   // ═══════════════════════════════════════════════════════════════════════
 
   modeDefaults(mode: ContentMode): {
@@ -810,7 +879,7 @@ comprehensive guide, in-depth look, exploring the`;
         return { wordCount: 1200, includeFAQ: false, includeStatistics: true,  includeExamples: true,  includeComparisons: false, includeConclusion: true };
       case 'listicle':
         return { wordCount: 1500, includeFAQ: false, includeStatistics: false, includeExamples: true,  includeComparisons: false, includeConclusion: false };
-      default: // seo_blog
+      default:
         return { wordCount: 1500, includeFAQ: true,  includeStatistics: true,  includeExamples: true,  includeComparisons: false, includeConclusion: true };
     }
   }
@@ -820,21 +889,21 @@ comprehensive guide, in-depth look, exploring the`;
   // ═══════════════════════════════════════════════════════════════════════
 
   private buildSEOGuidance(keyword: string, focus?: string, density?: number): string {
-    let guidance = `Mention "${keyword}" naturally in the headline, opening paragraph, and 2-3 times in the body. `;
+    let guidance = `Use "${keyword}" naturally in the headline, opening paragraph, and 2-3 times in the body. Don't stuff it — if it sounds forced, rephrase. `;
     switch (focus) {
-      case 'primary_keyword':    guidance += `Use the exact phrase naturally throughout.`; break;
-      case 'semantic_keywords':  guidance += `Focus on related concepts and semantic variations.`; break;
-      case 'long_tail':          guidance += `Include natural long-tail variations in headings and body.`; break;
-      default:                   guidance += `Balance the keyword with natural language.`;
+      case 'primary_keyword':   guidance += `Keep focus on the exact phrase throughout.`; break;
+      case 'semantic_keywords': guidance += `Cover related concepts and semantic variations — don't just repeat the keyword.`; break;
+      case 'long_tail':         guidance += `Incorporate natural long-tail variations in headings and body text.`; break;
+      default:                  guidance += `Balance keyword use with natural language. Readability first.`;
     }
-    if (density && density > 0) guidance += ` Target ~${density}% density but prioritise readability.`;
+    if (density && density > 0) guidance += ` Target approximately ${density}% keyword density — but never sacrifice readability to hit a number.`;
     return guidance;
   }
 
   private getAudienceDescription(audience: string): string {
-    if (audience.toLowerCase().includes('beginner')) return 'Explain everything clearly — assume no prior knowledge.';
-    if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) return 'Skip basics — focus on depth and nuance.';
-    return 'Assume intelligence but not expertise — explain ideas without being condescending.';
+    if (audience.toLowerCase().includes('beginner')) return "Reader has no prior knowledge — explain everything, assume nothing, use analogies.";
+    if (audience.toLowerCase().includes('expert') || audience.toLowerCase().includes('advanced')) return "Reader knows the basics — skip them. Focus on depth, nuance, and the things that aren't obvious.";
+    return "Reader is intelligent and curious but not a specialist. Explain clearly without being condescending.";
   }
 
   validateInternalLinks(

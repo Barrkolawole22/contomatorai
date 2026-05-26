@@ -1,13 +1,16 @@
 // backend/src/models/pipelineConfig.model.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
+export type PipelineCountry = 'NG' | 'US' | 'GB' | 'AU' | 'CA' | 'ZA' | 'IN' | 'Global';
+
 export interface IPipelineConfig extends Document {
   userId: mongoose.Types.ObjectId;
   siteId: mongoose.Types.ObjectId;
   isActive: boolean;
   schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
   niches: string[];
-  relevanceTopics: string[];   // broad categories for AI relevance gate e.g. ["law", "crime", "finance"]
+  relevanceTopics: string[];
+  country: PipelineCountry;
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -28,6 +31,11 @@ const pipelineConfigSchema = new Schema<IPipelineConfig>({
   },
   niches: { type: [String], required: true },
   relevanceTopics: { type: [String], default: [] },
+  country: {
+    type: String,
+    enum: ['NG', 'US', 'GB', 'AU', 'CA', 'ZA', 'IN', 'Global'],
+    default: 'Global',
+  },
   targetWordCount: { type: Number, default: 1500 },
   aiModel: { type: String, enum: ['gemini', 'gemini-pro', 'gpt4o', 'claude'], default: 'gemini' },
   previewWindowMinutes: { type: Number, default: 60 },

@@ -11,6 +11,8 @@ export interface RSSItem {
   source: string;
 }
 
+export type PipelineCountry = 'NG' | 'US' | 'GB' | 'AU' | 'CA' | 'ZA' | 'IN' | 'Global';
+
 // ─── In-memory feed cache (30 min TTL) ────────────────────────────────────────
 interface CacheEntry { items: any[]; fetchedAt: number; }
 const FEED_CACHE = new Map<string, CacheEntry>();
@@ -25,27 +27,113 @@ function setCachedFeed(url: string, items: any[]): void {
   FEED_CACHE.set(url, { items, fetchedAt: Date.now() });
 }
 
-// ─── Nigerian-specific signal words ──────────────────────────────────────────
-// These always use keyword search with gl=NG — they never appear in
-// generic Google News topic feeds.
-const NIGERIAN_SIGNALS = new Set([
-  'nigeria', 'nigerian', 'lagos', 'abuja', 'kano', 'ibadan', 'portharcourt',
-  'naira', 'ngn', 'cbn', 'efcc', 'icpc', 'inec', 'nnpc', 'nbc', 'ncc',
-  'jamb', 'waec', 'neco', 'utme', 'ssce', 'wassce', 'noun', 'asuu',
-  'unilag', 'unn', 'oau', 'abu', 'uniben', 'futa', 'futo', 'lasu', 'lautech',
-  'tinubu', 'buhari', 'nollywood', 'afrobeats', 'super eagles', 'super falcons',
-  'npfl', 'bvn', 'nin', 'pvc',
-]);
-function isNigerianKeyword(keyword: string): boolean {
-  const kw = keyword.toLowerCase().replace(/\s+/g, '');
-  return [...NIGERIAN_SIGNALS].some(sig => kw.includes(sig.replace(/\s+/g, '')));
-}
+// ─── Country config ───────────────────────────────────────────────────────────
+// Each country has:
+//   geo: Google News gl/ceid params
+//   registry: country-specific outlet feeds (topic-specific only — no general feeds)
+//   fallback: broader feeds used only when registry is thin
+const COUNTRY_CONFIG: Record<PipelineCountry, {
+  gl: string;
+  ceid: string;
+  registry: string[];
+  fallback: string[];
+}> = {
+  NG: {
+    gl: 'NG', ceid: 'NG:en',
+    registry: [
+      'https://www.premiumtimesng.com/feed',
+      'https://punchng.com/feed/',
+      'https://guardian.ng/feed/',
+      'https://thenationonlineng.net/feed/',
+      'https://www.vanguardngr.com/feed/',
+      'https://dailypost.ng/feed/',
+      'https://businessday.ng/feed/',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/africa/rss.xml',
+      'https://www.aljazeera.com/xml/rss/all.xml',
+    ],
+  },
+  US: {
+    gl: 'US', ceid: 'US:en',
+    registry: [
+      'https://feeds.npr.org/1001/rss.xml',
+      'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+      'https://feeds.washingtonpost.com/rss/national',
+      'https://feeds.reuters.com/reuters/topNews',
+      'https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml',
+    ],
+    fallback: [
+      'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+    ],
+  },
+  GB: {
+    gl: 'GB', ceid: 'GB:en',
+    registry: [
+      'https://feeds.bbci.co.uk/news/uk/rss.xml',
+      'https://www.theguardian.com/uk/rss',
+      'https://feeds.skynews.com/feeds/rss/uk.xml',
+      'https://www.telegraph.co.uk/rss.xml',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/rss.xml',
+    ],
+  },
+  AU: {
+    gl: 'AU', ceid: 'AU:en',
+    registry: [
+      'https://www.abc.net.au/news/feed/51120/rss.xml',
+      'https://feeds.smh.com.au/rssheadlines/breaking.xml',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/rss.xml',
+    ],
+  },
+  CA: {
+    gl: 'CA', ceid: 'CA:en',
+    registry: [
+      'https://rss.cbc.ca/lineup/topstories.xml',
+      'https://globalnews.ca/feed/',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/rss.xml',
+    ],
+  },
+  ZA: {
+    gl: 'ZA', ceid: 'ZA:en',
+    registry: [
+      'https://www.dailymaverick.co.za/feed/',
+      'https://ewn.co.za/RSS%20Feeds/Latest%20News',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/africa/rss.xml',
+    ],
+  },
+  IN: {
+    gl: 'IN', ceid: 'IN:en',
+    registry: [
+      'https://feeds.feedburner.com/ndtvnews-top-stories',
+      'https://timesofindia.indiatimes.com/rssfeedstopstories.cms',
+    ],
+    fallback: [
+      'https://feeds.bbci.co.uk/news/world/asia/rss.xml',
+    ],
+  },
+  Global: {
+    gl: 'US', ceid: 'US:en',
+    registry: [
+      'https://feeds.bbci.co.uk/news/world/rss.xml',
+      'https://www.aljazeera.com/xml/rss/all.xml',
+      'https://rss.dw.com/rdf/rss-en-all',
+      'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+      'https://feeds.reuters.com/reuters/topNews',
+    ],
+    fallback: [],
+  },
+};
 
-// ─── Registry: category-specific feeds only ───────────────────────────────────
-// RULE: every URL here must publish ONLY that topic's content.
-// General-purpose feeds (DW all, Al Jazeera all, NPR all) are excluded from
-// specific topic registries — they contaminate the pool with off-topic articles.
-// They live only in the fallback list below.
+// ─── Topic registry — category-specific feeds only ────────────────────────────
+// Used as a supplement when country registry alone doesn't hit the target.
 const TOPIC_REGISTRY: Record<string, string[]> = {
   education: [
     'https://feeds.bbci.co.uk/news/education/rss.xml',
@@ -61,69 +149,39 @@ const TOPIC_REGISTRY: Record<string, string[]> = {
   politics: [
     'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml',
     'https://www.theguardian.com/politics/rss',
-    'https://foreignpolicy.com/feed/',
   ],
   finance: [
     'https://feeds.bbci.co.uk/news/business/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
     'https://www.theguardian.com/business/rss',
-    'https://www.marketwatch.com/rss/topstories',
-    'https://feeds.cnbc.com/rss/cnbc/top-news-feed',
     'https://www.ft.com/?format=rss',
   ],
   technology: [
     'https://feeds.bbci.co.uk/news/technology/rss.xml',
-    'https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml',
-    'https://www.theguardian.com/technology/rss',
     'https://techcrunch.com/feed/',
     'https://www.theverge.com/rss/index.xml',
-    'https://feeds.arstechnica.com/arstechnica/index',
-    'https://www.wired.com/feed/rss',
   ],
   health: [
     'https://feeds.bbci.co.uk/news/health/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Health.xml',
     'https://www.theguardian.com/society/rss',
-    'https://www.statnews.com/feed/',
-    'https://www.medicalnewstoday.com/rss',
   ],
   business: [
     'https://feeds.bbci.co.uk/news/business/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
-    'https://www.theguardian.com/business/rss',
-    'https://www.ft.com/?format=rss',
-    'https://feeds.cnbc.com/rss/cnbc/top-news-feed',
   ],
   sports: [
     'https://feeds.bbci.co.uk/sport/rss.xml',
     'https://www.theguardian.com/sport/rss',
-    'https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml',
     'https://www.espn.com/espn/rss/news',
-    'https://www.goal.com/feeds/en/news',
-    'https://feeds.skynews.com/feeds/rss/sports.xml',
   ],
   entertainment: [
     'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
-    'https://www.theguardian.com/culture/rss',
-    'https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml',
     'https://variety.com/feed/',
-    'https://deadline.com/feed/',
-    'https://www.hollywoodreporter.com/feed/',
   ],
 };
 
-// Broad fallback feeds — used when no topic is matched or as last resort
-const GENERAL_FEEDS = [
-  'https://feeds.bbci.co.uk/news/world/rss.xml',
-  'https://www.aljazeera.com/xml/rss/all.xml',
-  'https://rss.dw.com/rdf/rss-en-all',
-  'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
-  'https://feeds.npr.org/1001/rss.xml',
-  'https://www.theguardian.com/world/rss',
-];
-
 // ─── Google News topic section feeds ─────────────────────────────────────────
-// Pre-categorised by Google — reliable for broad topics.
 const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   education:     'https://news.google.com/rss/headlines/section/topic/EDUCATION?hl=en&gl=US&ceid=US:en',
   politics:      'https://news.google.com/rss/headlines/section/topic/NATION?hl=en&gl=US&ceid=US:en',
@@ -133,81 +191,48 @@ const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   business:      'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en&gl=US&ceid=US:en',
   sports:        'https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en&gl=US&ceid=US:en',
   entertainment: 'https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en&gl=US&ceid=US:en',
-  world:         'https://news.google.com/rss/headlines/section/topic/WORLD?hl=en&gl=US&ceid=US:en',
 };
 
-// ─── Topic detection from relevanceTopics + niches ───────────────────────────
-// Maps user's broad relevance topics (set on the pipeline form) to a known
-// topic key. Falls back to 'general' if nothing matches.
+// ─── Topic detection from relevance topics + niches ───────────────────────────
 const TOPIC_ALIASES: Record<string, string> = {
-  // Education
   'education': 'education', 'school': 'education', 'academic': 'education',
   'learning': 'education', 'exam': 'education', 'university': 'education',
-  // Law
-  'law': 'law', 'legal': 'law', 'court': 'law', 'crime': 'law',
-  'justice': 'law', 'legislation': 'law',
-  // Politics
-  'politics': 'politics', 'political': 'politics', 'government': 'politics',
-  'election': 'politics', 'policy': 'politics',
-  // Finance
-  'finance': 'finance', 'financial': 'finance', 'money': 'finance',
-  'economy': 'finance', 'investment': 'finance', 'crypto': 'finance',
-  'banking': 'finance', 'trading': 'finance', 'forex': 'finance',
-  // Technology
-  'technology': 'technology', 'tech': 'technology', 'software': 'technology',
-  'ai': 'technology', 'startup': 'technology', 'digital': 'technology',
-  'cybersecurity': 'technology', 'programming': 'technology',
-  // Health
-  'health': 'health', 'medical': 'health', 'wellness': 'health',
-  'fitness': 'health', 'nutrition': 'health', 'diet': 'health',
-  'mental health': 'health', 'medicine': 'health',
-  // Business
-  'business': 'business', 'commerce': 'business', 'entrepreneurship': 'business',
-  'marketing': 'business', 'ecommerce': 'business', 'retail': 'business',
-  // Sports
-  'sports': 'sports', 'sport': 'sports', 'football': 'sports',
-  'basketball': 'sports', 'soccer': 'sports', 'athletics': 'sports',
-  // Entertainment
-  'entertainment': 'entertainment', 'music': 'entertainment', 'movies': 'entertainment',
-  'film': 'entertainment', 'celebrity': 'entertainment', 'gaming': 'entertainment',
-  'culture': 'entertainment', 'arts': 'entertainment',
+  'law': 'law', 'legal': 'law', 'court': 'law', 'crime': 'law', 'justice': 'law',
+  'politics': 'politics', 'political': 'politics', 'government': 'politics', 'election': 'politics',
+  'finance': 'finance', 'financial': 'finance', 'money': 'finance', 'economy': 'finance',
+  'investment': 'finance', 'crypto': 'finance', 'banking': 'finance', 'forex': 'finance',
+  'technology': 'technology', 'tech': 'technology', 'software': 'technology', 'ai': 'technology',
+  'health': 'health', 'medical': 'health', 'wellness': 'health', 'fitness': 'health', 'medicine': 'health',
+  'business': 'business', 'commerce': 'business', 'entrepreneurship': 'business', 'marketing': 'business',
+  'sports': 'sports', 'sport': 'sports', 'football': 'sports', 'basketball': 'sports',
+  'entertainment': 'entertainment', 'music': 'entertainment', 'movies': 'entertainment', 'film': 'entertainment',
 };
 
 function detectTopic(relevanceTopics: string[], niches: string[]): string {
   const combined = [...relevanceTopics, ...niches].join(' ').toLowerCase();
   for (const [alias, topic] of Object.entries(TOPIC_ALIASES)) {
-    if (combined.includes(alias)) {
-      logger.info(`RSS: detected topic "${topic}" from [${[...relevanceTopics, ...niches].join(', ')}]`);
-      return topic;
-    }
+    if (combined.includes(alias)) return topic;
   }
-  logger.info(`RSS: no topic match — using general feeds`);
   return 'general';
 }
 
 // ─── URL builders ─────────────────────────────────────────────────────────────
-// Combined query: "niche relevanceTopic" — narrows Google News without hardcoding.
-// e.g. niche="Books" + topic="Education" → "Books Education"
-// e.g. niche="Recipes" + topic="Health" → "Recipes Health"
+function buildGoogleNewsUrl(query: string, gl: string, ceid: string): string {
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=${gl}&ceid=${ceid}`;
+}
+
 function buildCombinedQuery(niche: string, relevanceTopics: string[]): string {
   if (relevanceTopics.length === 0) return niche;
-  // Use just the first relevance topic to keep query tight
   return `${niche} ${relevanceTopics[0]}`.trim();
 }
 
-function buildGoogleNewsUrl(query: string, geo: 'NG' | 'US' = 'US'): string {
-  const ceid = geo === 'NG' ? 'NG:en' : 'US:en';
-  return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=${geo}&ceid=${ceid}`;
-}
-
-// ─── Google News URL decoder (post-2024 base64 format) ───────────────────────
+// ─── Google News base64 URL decoder ──────────────────────────────────────────
 function decodeGoogleNewsBase64Url(encodedUrl: string): string | null {
   try {
     const match = encodedUrl.match(/\/articles\/(CBMi[A-Za-z0-9+/=_-]+)/);
     if (!match) return null;
-    const base64Part = match[1].replace('CBMi', '');
     const decoded = Buffer.from(
-      base64Part.replace(/-/g, '+').replace(/_/g, '/'),
+      match[1].replace('CBMi', '').replace(/-/g, '+').replace(/_/g, '/'),
       'base64'
     ).toString('utf-8');
     const urlMatch = decoded.match(/https?:\/\/[^\s\x00-\x1f"<>]+/);
@@ -231,10 +256,9 @@ async function resolveGoogleNewsUrl(googleUrl: string, rawItem: any): Promise<st
       validateStatus: () => true,
     });
     const html: string = response.data || '';
-    const canonicalMatch =
-      html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i) ||
-      html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
-    if (canonicalMatch && !canonicalMatch[1].includes('news.google.com')) return canonicalMatch[1];
+    const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
+      || html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
+    if (canonical && !canonical[1].includes('news.google.com')) return canonical[1];
     const dataAttr = html.match(/data-n-au="([^"]+)"/);
     if (dataAttr) return dataAttr[1];
     const finalUrl: string = response.request?.res?.responseUrl || '';
@@ -246,7 +270,6 @@ async function resolveGoogleNewsUrl(googleUrl: string, rawItem: any): Promise<st
 }
 
 function isGoogleNewsUrl(url: string): boolean { return url.includes('news.google.com'); }
-
 function isWithinWindow(pubDate: string, hours = 24): boolean {
   if (!pubDate) return true;
   return new Date(pubDate).getTime() >= Date.now() - hours * 60 * 60 * 1000;
@@ -284,16 +307,15 @@ export class RSSService {
     };
   }
 
-  // ── Step 1: Registry feeds in parallel ───────────────────────────────────────
-  // Topic-specific feeds (BBC Education, Guardian Law, etc.) — all pre-filtered
-  // by topic so no keyword matching needed here.
-  private async _fetchRegistry(
-    topic: string,
+  // Step 1: country registry feeds — all specific to the configured country ──
+  private async _fetchCountryRegistry(
+    country: PipelineCountry,
     windowHours: number,
     limit: number
   ): Promise<RSSItem[]> {
-    const feeds = TOPIC_REGISTRY[topic] || GENERAL_FEEDS;
-    logger.info(`RSS: step 1 — ${feeds.length} registry feeds for topic "${topic}"`);
+    const cfg = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.Global;
+    const feeds = [...cfg.registry, ...cfg.fallback];
+    logger.info(`RSS: step 1 — ${feeds.length} country feeds for "${country}"`);
 
     const results = await Promise.allSettled(
       feeds.map(url => this._fetchRaw(url).then(items => ({ url, items })))
@@ -318,24 +340,13 @@ export class RSSService {
       if (pool.length >= limit) break;
     }
 
-    logger.info(`RSS: step 1 registry → ${pool.length} items`);
+    logger.info(`RSS: step 1 country registry → ${pool.length} items`);
     return pool;
   }
 
-  // ── Step 2: Google News supplement ───────────────────────────────────────────
-  //
-  // 2a. Google News topic section feed (EDUCATION, HEALTH, SPORTS etc.)
-  //     Covers all generic niche words at once — pre-categorised by Google.
-  //     "Books" on an education site → EDUCATION topic feed, not a keyword search.
-  //
-  // 2b. Non-Nigerian niches → combined query "niche + relevanceTopic"
-  //     "Books" + "Education" → search "Books Education" on Google News.
-  //     This contextualises the query so Google returns educational book news,
-  //     not beach reads. Works for any niche without hardcoding.
-  //
-  // 2c. Nigerian niches → keyword search with gl=NG
-  //     Jamb, Waec, Neco etc. never appear in generic topic feeds.
+  // Step 2: topic feed + keyword searches scoped to the configured country ───
   private async _fetchSupplement(
+    country: PipelineCountry,
     topic: string,
     niches: string[],
     relevanceTopics: string[],
@@ -343,6 +354,7 @@ export class RSSService {
     limit: number,
     existingKeys: Set<string>
   ): Promise<RSSItem[]> {
+    const cfg = COUNTRY_CONFIG[country] || COUNTRY_CONFIG.Global;
     const pool: RSSItem[] = [];
     const seen = new Set(existingKeys);
 
@@ -357,10 +369,24 @@ export class RSSService {
       return false;
     };
 
-    // 2a. Google News topic section feed
+    // 2a. Topic-specific registry feeds (if topic is known)
+    const topicFeeds = TOPIC_REGISTRY[topic] || [];
+    if (topicFeeds.length > 0) {
+      logger.info(`RSS: step 2a — topic feeds for "${topic}"`);
+      const results = await Promise.allSettled(topicFeeds.map(url => this._fetchRaw(url).then(items => ({ url, items }))));
+      for (const result of results) {
+        if (result.status === 'rejected') continue;
+        for (const raw of result.value.items) {
+          await addItem(raw, new URL(result.value.url).hostname);
+          if (pool.length >= limit) return pool;
+        }
+      }
+    }
+
+    // 2b. Google News topic section feed
     const topicFeedUrl = GOOGLE_TOPIC_FEEDS[topic];
-    if (topicFeedUrl) {
-      logger.info(`RSS: step 2a — Google News topic feed "${topic}"`);
+    if (topicFeedUrl && pool.length < limit) {
+      logger.info(`RSS: step 2b — Google News topic feed "${topic}"`);
       const items = await this._fetchRaw(topicFeedUrl);
       for (const raw of items) {
         await addItem(raw, 'Google News');
@@ -368,45 +394,18 @@ export class RSSService {
       }
     }
 
-    // 2b. Non-Nigerian niches → combined query "niche + relevanceTopic" on Google News US
-    const genericNiches = niches.filter(n => !isNigerianKeyword(n));
-    if (genericNiches.length > 0 && pool.length < limit) {
-      logger.info(`RSS: step 2b — combined queries for generic niches: [${genericNiches.join(', ')}]`);
-      const queries = genericNiches.map(niche => ({
-        niche,
-        query: buildCombinedQuery(niche, relevanceTopics),
-      }));
-
+    // 2c. Combined keyword search scoped to country's geo
+    if (pool.length < limit) {
+      logger.info(`RSS: step 2c — keyword searches for niches (gl=${cfg.gl})`);
+      const queries = niches.map(niche => buildCombinedQuery(niche, relevanceTopics));
       const results = await Promise.allSettled(
-        queries.map(({ query }) =>
-          this._fetchRaw(buildGoogleNewsUrl(query, 'US')).then(items => ({ query, items }))
-        )
-      );
-
-      for (const result of results) {
-        if (result.status === 'rejected') continue;
-        const { query, items } = result.value;
-        logger.info(`RSS: step 2b query "${query}" → ${items.length} raw items`);
-        for (const raw of items) {
-          await addItem(raw, 'Google News');
-          if (pool.length >= limit) return pool;
-        }
-      }
-    }
-
-    // 2c. Nigerian niches → keyword search gl=NG
-    const nigerianNiches = niches.filter(n => isNigerianKeyword(n));
-    if (nigerianNiches.length > 0 && pool.length < limit) {
-      logger.info(`RSS: step 2c — Nigerian niches gl=NG: [${nigerianNiches.join(', ')}]`);
-      const results = await Promise.allSettled(
-        nigerianNiches.map(niche =>
-          this._fetchRaw(buildGoogleNewsUrl(niche, 'NG')).then(items => ({ niche, items }))
-        )
+        queries.map(q => this._fetchRaw(buildGoogleNewsUrl(q, cfg.gl, cfg.ceid)).then(items => ({ q, items })))
       );
       for (const result of results) {
         if (result.status === 'rejected') continue;
+        logger.info(`RSS: step 2c query "${result.value.q}" → ${result.value.items.length} raw items`);
         for (const raw of result.value.items) {
-          await addItem(raw, 'Google News Nigeria');
+          await addItem(raw, 'Google News');
           if (pool.length >= limit) return pool;
         }
       }
@@ -415,19 +414,21 @@ export class RSSService {
     return pool;
   }
 
-  // ── Main public method ────────────────────────────────────────────────────────
+  // ── Main public method ─────────────────────────────────────────────────────
   async fetchItemsForNiches(
     niches: string[],
     totalLimit = 10,
     windowHours = 24,
     relevanceTopics: string[] = [],
+    country: PipelineCountry = 'Global',
   ): Promise<RSSItem[]> {
     if (!niches || niches.length === 0) return [];
 
     const topic = detectTopic(relevanceTopics, niches);
+    logger.info(`RSS: country="${country}", topic="${topic}", niches=[${niches.join(', ')}]`);
 
-    // Step 1: registry feeds
-    const registry = await this._fetchRegistry(topic, windowHours, totalLimit);
+    // Step 1: country registry
+    const registry = await this._fetchCountryRegistry(country, windowHours, totalLimit);
     if (registry.length >= totalLimit) {
       return registry
         .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
@@ -442,15 +443,15 @@ export class RSSService {
     logger.info(`RSS: step 1 gave ${registry.length}/${totalLimit} — running step 2`);
 
     const supplement = await this._fetchSupplement(
-      topic, niches, relevanceTopics, windowHours, remaining, existingKeys
+      country, topic, niches, relevanceTopics, windowHours, remaining, existingKeys
     );
 
     const combined = [...registry, ...supplement];
 
-    // Step 3: widen to 72h if still empty
+    // Step 3: widen window to 72h if still empty
     if (combined.length === 0 && windowHours <= 24) {
       logger.warn(`RSS: nothing in ${windowHours}h window — retrying with 72h`);
-      return this.fetchItemsForNiches(niches, totalLimit, 72, relevanceTopics);
+      return this.fetchItemsForNiches(niches, totalLimit, 72, relevanceTopics, country);
     }
 
     return combined

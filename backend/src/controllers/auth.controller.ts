@@ -51,6 +51,7 @@ interface UserResponse {
   
   // Profile information
   avatar?: string;
+  hasSeenTour?: boolean;
   phone?: string;
   location?: string;
   company?: string;
@@ -139,6 +140,7 @@ const formatUserResponse = (user: any): UserResponse => {
     
     // Profile information
     avatar: user.avatar,
+    hasSeenTour: user.hasSeenTour || false,
     phone: user.phone,
     location: user.location,
     company: user.company,
@@ -188,7 +190,6 @@ export const deductWordCredits = async (req: AuthenticatedRequest, res: Response
 
     console.log(`Processing word credit deduction: ${wordCount} words for user ${userId}`);
 
-    // Find user and check current word credits
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -197,7 +198,6 @@ export const deductWordCredits = async (req: AuthenticatedRequest, res: Response
       });
     }
 
-    // Check if user has sufficient word credits
     if (user.wordCredits < wordCount) {
       console.log(`Insufficient word credits. Available: ${user.wordCredits}, Required: ${wordCount}`);
       return res.status(400).json({
@@ -211,12 +211,10 @@ export const deductWordCredits = async (req: AuthenticatedRequest, res: Response
       });
     }
 
-    // Get current date for monthly usage tracking
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
-    // Reset monthly usage if we're in a new month
     const lastUsageDate = user.lastUsageDate || new Date(0);
     const isNewMonth = lastUsageDate.getMonth() !== currentMonth || 
                       lastUsageDate.getFullYear() !== currentYear;
@@ -225,7 +223,6 @@ export const deductWordCredits = async (req: AuthenticatedRequest, res: Response
       user.currentMonthUsage = 0;
     }
 
-    // Update user word credits and usage
     user.wordCredits -= wordCount;
     user.totalWordsUsed = (user.totalWordsUsed || 0) + wordCount;
     user.currentMonthUsage = (user.currentMonthUsage || 0) + wordCount;
@@ -277,7 +274,6 @@ export const addWordCredits = async (req: AuthenticatedRequest, res: Response): 
 
     console.log(`Adding ${wordCount} word credits to user ${userId}. Reason: ${reason || 'Not specified'}`);
 
-    // Find user
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -286,7 +282,6 @@ export const addWordCredits = async (req: AuthenticatedRequest, res: Response): 
       });
     }
 
-    // Add word credits
     user.wordCredits = (user.wordCredits || 0) + wordCount;
     await user.save();
 
@@ -331,7 +326,6 @@ export const getWordCreditStatus = async (req: AuthenticatedRequest, res: Respon
       });
     }
 
-    // Calculate usage statistics
     const totalCreditsEverHad = (user.wordCredits || 0) + (user.totalWordsUsed || 0);
     const usagePercentage = totalCreditsEverHad > 0 ? 
       ((user.totalWordsUsed || 0) / totalCreditsEverHad) * 100 : 0;
@@ -364,7 +358,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
   try {
     const { name, email, password, confirmPassword } = req.body;
 
-    // Input validation
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -378,7 +371,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
       });
     }
 
-    // Password confirmation validation
     if (password !== confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -389,7 +381,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
       });
     }
 
-    // Password strength validation
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
     if (!passwordRegex.test(password)) {
       return res.status(400).json({
@@ -406,7 +397,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
       });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({ 
@@ -415,7 +405,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
       });
     }
 
-    // Create admin user with word credits
     const adminUser = new User({
       name: name.trim(),
       email: email.toLowerCase(),
@@ -429,7 +418,6 @@ export const createAdmin = async (req: Request, res: Response): Promise<Response
 
     await adminUser.save();
 
-    // Generate JWT token
     const token = jwt.sign(
       { 
         userId: adminUser._id, 
@@ -520,7 +508,6 @@ export const googleCallback = async (req: Request, res: Response) => {
       return res.redirect(`${env.FRONTEND_URL}/login?error=google-auth-failed`);
     }
 
-    // Google already verifies emails — mark user as verified
     if (!user.emailVerified) {
       await User.findByIdAndUpdate(user._id, { emailVerified: true });
     }
@@ -608,7 +595,8 @@ export const register = async (req: Request, res: Response): Promise<Response> =
       status: 'active',
       credits: 10,
       wordCredits: 1000,
-      emailVerified: false
+      emailVerified: false,
+      hasSeenTour: false
     });
     
     await newUser.save();
@@ -663,7 +651,7 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
     }
 
     const user = await User.findOne({ email: email.toLowerCase() })
-      .select('+password +credits +wordCredits +totalWordsUsed +currentMonthUsage +status +emailVerified +lastLogin');
+      .select('+password +credits +wordCredits +totalWordsUsed +currentMonthUsage +status +emailVerified +lastLogin +hasSeenTour');
       
     if (!user) {
       return res.status(401).json({ 
@@ -754,7 +742,7 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response): Prom
     console.log('Fetching user with ID:', userId);
 
     const user = await User.findById(userId)
-      .select('+credits +wordCredits +totalWordsUsed +currentMonthUsage +status +emailVerified +lastLogin +createdAt +role +name +email');
+      .select('+credits +wordCredits +totalWordsUsed +currentMonthUsage +status +emailVerified +lastLogin +createdAt +role +name +email +hasSeenTour');
     
     if (!user) {
       console.log('User not found in database');
@@ -770,12 +758,11 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response): Prom
       email: user.email,
       name: user.name,
       wordCredits: user.wordCredits,
-      role: user.role
+      role: user.role,
+      hasSeenTour: user.hasSeenTour
     });
 
     const userResponse = formatUserResponse(user);
-
-    console.log('Formatted response:', userResponse);
 
     return res.status(200).json({
       success: true,
@@ -801,7 +788,7 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response): Prom
 export const updateProfile = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
   try {
     const userId = req.user?.id;
-    const { name, email } = req.body;
+    const { name, email, hasSeenTour } = req.body;
 
     if (!userId) {
       return res.status(401).json({
@@ -810,10 +797,10 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
       });
     }
 
-    if (!name && !email) {
+    if (!name && !email && hasSeenTour === undefined) {
       return res.status(400).json({
         success: false,
-        message: 'At least one field (name or email) is required'
+        message: 'At least one field is required'
       });
     }
 
@@ -841,6 +828,7 @@ export const updateProfile = async (req: AuthenticatedRequest, res: Response): P
     const updateData: any = {};
     if (name) updateData.name = name.trim();
     if (email) updateData.email = email.toLowerCase();
+    if (hasSeenTour !== undefined) updateData.hasSeenTour = hasSeenTour;
 
     const user = await User.findByIdAndUpdate(
       userId,
@@ -1162,7 +1150,7 @@ const verifyTokenUtil = (token: string): JwtPayload => {
   }
 };
 
-// Refresh token utility
+// Refresh token
 export const refreshToken = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { token } = req.body;
@@ -1213,7 +1201,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<Respons
   }
 };
 
-// Logout utility
+// Logout
 export const logout = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
   try {
     return res.status(200).json({
