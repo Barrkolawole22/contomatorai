@@ -177,8 +177,48 @@ export class RSSService {
     return pool;
   }
 
-  // Step 2: topic-specific supplement
-  private async _fetchSupplement(
+  // Step 2a: country-specific topic feeds only
+  private async _fetchCountryTopicFeeds(
+    country: PipelineCountry,
+    topic: string,
+    windowHours: number,
+    limit: number,
+    existingKeys: Set<string> = new Set()
+  ): Promise<RSSItem[]> {
+    const feeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
+    if (!feeds.length) return [];
+
+    logger.info(`RSS: step 2a country-topic "${country}/${topic}" — ${feeds.length} feeds (${windowHours}h window)`);
+
+    const pool: RSSItem[] = [];
+    const seen = new Set(existingKeys);
+
+    const results = await Promise.allSettled(
+      feeds.map(url => this._fetchRaw(url).then(items => ({ url, items })))
+    );
+
+    for (const result of results) {
+      if (result.status === 'rejected') continue;
+      const { url, items } = result.value;
+      const hostname = new URL(url).hostname;
+      for (const raw of items) {
+        if (!isWithinWindow(raw.pubDate || '', windowHours)) continue;
+        const key = this.toKey(raw.title || '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const shaped = await this._shape(raw, hostname);
+        if (shaped) pool.push(shaped);
+        if (pool.length >= limit) break;
+      }
+      if (pool.length >= limit) break;
+    }
+
+    logger.info(`RSS: step 2a → ${pool.length} items`);
+    return pool;
+  }
+
+  // Steps 2b–2d: international topic feeds, Google News section, keyword search
+  private async _fetchInternationalSupplement(
     country: PipelineCountry,
     topic: string,
     niches: string[],
@@ -217,11 +257,8 @@ export class RSSService {
       }
     };
 
-    // 2a. Country + topic specific feeds (local, on-topic — highest quality)
+    // 2b. Generic international topic feeds
     const countryTopicFeeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
-    await fetchFeeds(countryTopicFeeds, `step 2a country-topic "${country}/${topic}"`);
-
-    // 2b. Generic international topic feeds (fallback)
     const genericFeeds = (TOPIC_REGISTRY[topic] || []).filter(u => !countryTopicFeeds.includes(u));
     await fetchFeeds(genericFeeds, `step 2b generic topic "${topic}"`);
 
@@ -269,26 +306,50 @@ export class RSSService {
     const topic = detectTopic(relevanceTopics, niches);
     logger.info(`RSS: country="${country}", topic="${topic}", niches=[${niches.join(', ')}]`);
 
-    // When a specific topic is detected, skip the broad country registry entirely.
-    // Step 1 only floods the pool with general news that the AI gate will reject.
+    // ── Topic-aware path ─────────────────────────────────────────────────────
     if (topic !== 'general') {
-      logger.info(`RSS: topic "${topic}" detected — skipping step 1, going straight to topic feeds`);
-      const supplement = await this._fetchSupplement(
-        country, topic, niches, relevanceTopics,
-        windowHours, totalLimit, new Set()
-      );
+      logger.info(`RSS: topic "${topic}" detected — skipping step 1`);
 
-      if (supplement.length === 0 && windowHours <= 24) {
-        logger.warn(`RSS: nothing in ${windowHours}h window — retrying with 72h`);
-        return this.fetchItemsForNiches(niches, totalLimit, 72, relevanceTopics, country);
+      const hasCountryFeeds = !!(COUNTRY_TOPIC_REGISTRY[country]?.[topic]?.length);
+
+      // Step 2a: country-specific topic feeds (primary source)
+      let primary = hasCountryFeeds
+        ? await this._fetchCountryTopicFeeds(country, topic, windowHours, totalLimit)
+        : [];
+
+      // If country feeds exist but returned nothing in 24h, widen to 72h before
+      // falling back to international sources the AI gate will likely reject anyway.
+      if (hasCountryFeeds && primary.length === 0 && windowHours <= 24) {
+        logger.warn(`RSS: step 2a empty within ${windowHours}h — retrying with 72h`);
+        primary = await this._fetchCountryTopicFeeds(country, topic, 72, totalLimit);
       }
 
-      return supplement
+      if (primary.length >= totalLimit) {
+        return primary
+          .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+          .slice(0, totalLimit);
+      }
+
+      // Steps 2b–2d: international supplement for remaining slots
+      const existingKeys = new Set(primary.map(i => this.toKey(i.title)));
+      const international = await this._fetchInternationalSupplement(
+        country, topic, niches, relevanceTopics,
+        windowHours, totalLimit - primary.length, existingKeys
+      );
+
+      const combined = [...primary, ...international];
+
+      if (combined.length === 0) {
+        logger.warn(`RSS: nothing found across all sources — aborting`);
+        return [];
+      }
+
+      return combined
         .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
         .slice(0, totalLimit);
     }
 
-    // No topic signal — use broad country registry, supplement if needed
+    // ── No topic signal: broad country registry ──────────────────────────────
     const registry = await this._fetchCountryRegistry(country, windowHours, totalLimit);
     if (registry.length >= totalLimit) {
       return registry
@@ -299,12 +360,12 @@ export class RSSService {
     const existingKeys = new Set(registry.map(i => this.toKey(i.title)));
     logger.info(`RSS: step 1 gave ${registry.length}/${totalLimit} — running step 2`);
 
-    const supplement = await this._fetchSupplement(
+    const international = await this._fetchInternationalSupplement(
       country, topic, niches, relevanceTopics,
       windowHours, totalLimit - registry.length, existingKeys
     );
 
-    const combined = [...registry, ...supplement];
+    const combined = [...registry, ...international];
 
     if (combined.length === 0 && windowHours <= 24) {
       logger.warn(`RSS: nothing in ${windowHours}h window — retrying with 72h`);
