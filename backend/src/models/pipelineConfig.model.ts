@@ -15,6 +15,8 @@ export interface IPipelineConfig extends Document {
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
   maxArticlesPerRun: number;
+  enableImpactFormats: boolean;
+  allowedImpactFormats: string[];
   lastRunAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -40,6 +42,8 @@ const pipelineConfigSchema = new Schema<IPipelineConfig>({
   aiModel: { type: String, enum: ['gemini', 'gemini-pro', 'gpt4o', 'claude'], default: 'gemini' },
   previewWindowMinutes: { type: Number, default: 60 },
   maxArticlesPerRun: { type: Number, default: 1 },
+  enableImpactFormats: { type: Boolean, default: false },
+  allowedImpactFormats: { type: [String], default: [] },
   lastRunAt: Date,
 }, { timestamps: true });
 

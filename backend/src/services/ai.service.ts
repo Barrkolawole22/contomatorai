@@ -3,7 +3,7 @@ import logger from '../config/logger';
 import geminiService from './gemini.service';
 import openaiService from './openai.service';
 import claudeService from './claude.service';
-import type { ContentMode } from './prompt-builder.service';
+import type { ContentMode, ImpactFormat } from './prompt-builder.service';
 
 export type AIModel = 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
 
@@ -53,6 +53,12 @@ export const MODEL_CONFIG = {
 interface GenerationOptions {
   // Primary content mode — drives structure, voice, and heading style
   contentMode?: ContentMode;
+
+  // Impact format — overrides standard headline + structure blocks
+  impactFormat?: ImpactFormat;
+
+  // Niche context hint for impact format variable injection
+  niche?: string;
 
   // Legacy fields — kept for backward compatibility
   tone?: string;
@@ -114,7 +120,8 @@ export class AIService {
 
     logger.info(
       `Generating content with ${config.label} (${model}): ` +
-      `${targetWordCount} words, mode: ${options.contentMode || 'seo_blog'}, ~${estimatedCredits} credits`
+      `${targetWordCount} words, mode: ${options.contentMode || 'seo_blog'}, ` +
+      `format: ${options.impactFormat || 'standard'}, ~${estimatedCredits} credits`
     );
 
     try {

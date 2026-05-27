@@ -11,27 +11,38 @@ import Content from '../models/content.model';
 import User from '../models/user.model';
 import wordpressService from './wordpress.service';
 import sitemapCrawlerService from './sitemap-crawler.service';
+import { IMPACT_FORMAT_MODE } from './prompt-builder.service';
+import type { ImpactFormat } from './prompt-builder.service';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
 const MIN_CONTEXT_WORDS = 100;
 const PUBLISH_STAGGER_MINUTES = 120;
 const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
-// How many RSS items to fetch per run relative to the article target.
-// e.g. target=2, multiplier=10 → fetch up to 20 candidates, stop generating once 2 pass the gate.
 const RSS_FETCH_MULTIPLIER = 10;
+
+// Full list of valid impact format IDs for response parsing
+const VALID_IMPACT_FORMATS = new Set<string>([
+  'rate_change_alert', 'policy_shift', 'price_hike_survival', 'feature_removal_warning',
+  'new_law_breakdown', 'scam_fraud_alert', 'product_recall_guide', 'market_crash_explainer',
+  'subscription_trap', 'comparison_flip', 'deadline_reminder', 'hidden_cost_revealer',
+  'upgrade_decision', 'data_breach_response', 'trend_reality_check', 'beginner_entry_point',
+  'contract_renewal_audit', 'seasonal_timing_guide', 'myth_buster', 'risk_explainer',
+]);
 
 /**
  * Ask Gemini Flash: is this article relevant to the configured topics?
- * Returns true (proceed) or false (skip). Fast + cheap — ~10 tokens output.
+ * When classifyFormat=true, also identifies the best impact format in the same call.
+ * Returns relevant (bool), reason (string), and optionally suggestedFormat.
  */
 async function aiRelevanceCheck(
   title: string,
   description: string,
   relevanceTopics: string[],
   niches: string[],
-  country: string = 'Global'
-): Promise<{ relevant: boolean; reason: string }> {
+  country: string = 'Global',
+  classifyFormat: boolean = false
+): Promise<{ relevant: boolean; reason: string; suggestedFormat?: ImpactFormat }> {
   try {
     const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -40,40 +51,90 @@ async function aiRelevanceCheck(
       generationConfig: {
         maxOutputTokens: 100,
         temperature: 0,
-        // Disable thinking — this is a simple YES/NO classification task.
-        // Without this, 2.5-flash exhausts the token budget on internal
-        // reasoning and outputs nothing, causing every check to default to NO.
         thinkingConfig: { thinkingBudget: 0 },
       } as any,
     });
 
-    const prompt = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
+    const countryLabel =
+      country === 'Global' ? 'worldwide sources'
+      : country === 'NG' ? 'Nigeria'
+      : country === 'US' ? 'the United States'
+      : country === 'GB' ? 'the United Kingdom'
+      : country;
+
+    const relevanceSection = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
 
 This website covers: ${relevanceTopics.join(', ')}
 The site's specific content areas include: ${niches.join(', ')}
-This site focuses on content from: ${country === 'Global' ? 'worldwide sources' : country === 'NG' ? 'Nigeria' : country === 'US' ? 'the United States' : country === 'GB' ? 'the United Kingdom' : country}
+This site focuses on content from: ${countryLabel}
 
 ANSWER YES if the article is about ANY of the following:
 - The exact topics listed above, or anything clearly related to them
 - People, institutions, policies, or events within those topic areas
 - News, updates, research, or developments in those fields
-- Any article where a reader interested in "${relevanceTopics.join(' or ')}" would find it useful or interesting
+- Any article where a reader interested in "${relevanceTopics.join(' or ')}" would find it useful
 
-ANSWER NO if the article has no connection to the topics above, OR if it is clearly about a different country than the one this site focuses on (e.g. reject US news for a Nigerian site).
+ANSWER NO if the article has no connection to the topics above, OR if it is clearly about a different country than the one this site focuses on.
 Exception: global/international news relevant to the topic is always acceptable.
 When in doubt, answer YES.
 
 Article title: "${title}"
-Article description: "${description || '(none)'}"
+Article description: "${description || '(none)'}"`;
+
+    const formatSection = classifyFormat ? `
+
+Additionally, identify the single best content format for this article from the list below.
+Choose the one that most precisely matches what the article is about:
+
+rate_change_alert — a rate, fee, or yield has changed
+policy_shift — a new rule, regulation, or official policy was announced
+price_hike_survival — a price increase was announced
+feature_removal_warning — a feature is being removed or locked behind a paywall
+new_law_breakdown — a new law was passed or a ruling was issued
+scam_fraud_alert — a new scam, fraud, or security threat was identified
+product_recall_guide — a product recall or safety warning was issued
+market_crash_explainer — a market drop or significant financial movement occurred
+subscription_trap — hidden fees or subscription terms were revealed
+comparison_flip — context has changed which of two options is now better
+deadline_reminder — a time-sensitive action has a specific upcoming deadline
+hidden_cost_revealer — a full cost breakdown reveals more than was advertised
+upgrade_decision — a new version or product was released, triggering an upgrade decision
+data_breach_response — a data breach or security incident was announced
+trend_reality_check — a viral claim or trend needs fact-checking against data
+beginner_entry_point — newcomers need a clear starting point into a topic
+contract_renewal_audit — a contract or subscription renewal decision is triggered
+seasonal_timing_guide — timing-based advice for an action or purchase
+myth_buster — a common misconception needs correcting with evidence
+risk_explainer — risks of a decision or action should be explained before committing
+
+Reply format (choose one):
+- YES:[format_id]   (relevant, with best format — e.g. YES:rate_change_alert)
+- YES:none          (relevant, but no format fits)
+- NO                (not relevant)
+
+Reply with nothing else.` : `
 
 Reply with only YES or NO.`;
 
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(relevanceSection + formatSection);
     const answer = result.response.text().trim().toUpperCase();
     const relevant = answer.startsWith('YES');
-    return { relevant, reason: relevant ? 'AI approved' : `AI rejected: not relevant to [${relevanceTopics.join(', ')}]` };
+
+    let suggestedFormat: ImpactFormat | undefined;
+    if (relevant && classifyFormat) {
+      const match = answer.match(/^YES:([A-Z_]+)/i);
+      const formatId = match?.[1]?.toLowerCase();
+      if (formatId && formatId !== 'none' && VALID_IMPACT_FORMATS.has(formatId)) {
+        suggestedFormat = formatId as ImpactFormat;
+      }
+    }
+
+    return {
+      relevant,
+      reason: relevant ? 'AI approved' : `AI rejected: not relevant to [${relevanceTopics.join(', ')}]`,
+      suggestedFormat,
+    };
   } catch (err: any) {
-    // If AI check fails, default to allowing the article through
     logger.warn(`AI relevance check failed: ${err.message} -- defaulting to allow`);
     return { relevant: true, reason: 'AI check failed — allowed by default' };
   }
@@ -103,6 +164,8 @@ export class AutonomousPipelineService {
     const siteIdString = siteObjectId?.toString();
     const relevanceTopics: string[] = (config as any).relevanceTopics || [];
     const country: string = (config as any).country || 'Global';
+    const enableImpactFormats: boolean = (config as any).enableImpactFormats || false;
+    const allowedImpactFormats: string[] = (config as any).allowedImpactFormats || [];
     let proQuotaExhausted = false;
 
     try {
@@ -120,8 +183,6 @@ export class AutonomousPipelineService {
         return;
       }
 
-      // Fetch a large pool so the gate can reject freely and still hit the target.
-      // rss.service handles all niche-to-query logic internally — no filtering here.
       const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
       const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics, country as any);
 
@@ -141,7 +202,6 @@ export class AutonomousPipelineService {
       let articleIndex = 0;
 
       for (const item of rssItems) {
-        // Stop as soon as we have generated the target number of articles.
         if (pipelineRun.articlesGenerated >= config.maxArticlesPerRun) {
           logger.info(`Pipeline ${configId}: reached target of ${config.maxArticlesPerRun} article(s) -- stopping early`);
           break;
@@ -149,22 +209,42 @@ export class AutonomousPipelineService {
 
         try {
           // ── AI RELEVANCE GATE ─────────────────────────────────────────────
-          // Always runs. Uses relevanceTopics if set, falls back to niches.
-          // This guarantees irrelevant articles are filtered on every pipeline
-          // regardless of whether the user configured explicit relevance topics.
           const meaningfulNiches = niches.filter(n => n.length >= 4);
           const gateTopics = relevanceTopics.length > 0 ? relevanceTopics : meaningfulNiches;
 
+          let suggestedFormat: ImpactFormat | undefined;
+
           if (gateTopics.length > 0) {
-            const check = await aiRelevanceCheck(item.title, item.description, gateTopics, meaningfulNiches, country);
+            const check = await aiRelevanceCheck(
+              item.title,
+              item.description,
+              gateTopics,
+              meaningfulNiches,
+              country,
+              enableImpactFormats  // only classify format when feature is enabled
+            );
+
             if (!check.relevant) {
               logger.warn(`AI gate rejected "${item.title}": ${check.reason}`);
               pipelineRun.results.push({ topic: item.title, status: 'skipped', error: check.reason });
               continue;
             }
-            logger.info(`AI gate approved "${item.title}"`);
+
+            logger.info(`AI gate approved "${item.title}"${check.suggestedFormat ? ` [format: ${check.suggestedFormat}]` : ''}`);
+            suggestedFormat = check.suggestedFormat;
           }
           // ─────────────────────────────────────────────────────────────────
+
+          // Filter by allowedImpactFormats if the user restricted which formats to use
+          let impactFormat: ImpactFormat | undefined;
+          if (enableImpactFormats && suggestedFormat) {
+            const isAllowed = allowedImpactFormats.length === 0 || allowedImpactFormats.includes(suggestedFormat);
+            if (isAllowed) {
+              impactFormat = suggestedFormat;
+            } else {
+              logger.info(`Format "${suggestedFormat}" not in allowedImpactFormats — using standard generation`);
+            }
+          }
 
           let contextSeed = [item.title, item.description].filter(Boolean).join('\n\n');
           let scrapedImages: ScrapedImage[] = [];
@@ -208,10 +288,13 @@ export class AutonomousPipelineService {
             contextSeed,
           ].join('\n');
 
-          logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars, images: ${scrapedImages.length})`);
+          logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars, images: ${scrapedImages.length}, format: ${impactFormat || 'standard'})`);
 
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
           const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
+
+          // Resolve content mode from impact format if set, otherwise fall through to default
+          const contentMode = impactFormat ? IMPACT_FORMAT_MODE[impactFormat] : undefined;
 
           let articleResult: any;
           const generationOptions = {
@@ -226,6 +309,7 @@ export class AutonomousPipelineService {
             sourceUrl,
             sourceName,
             articleImages: scrapedImages.map(img => ({ url: img.url, alt: img.alt })),
+            ...(impactFormat && { impactFormat, contentMode, niche: niches[0] }),
           };
 
           try {
@@ -240,8 +324,6 @@ export class AutonomousPipelineService {
             }
           }
 
-          // Strip the opening <h1> — WordPress and the theme already render
-          // the post title as H1. Without this, the page has 3 H1 tags.
           const cleanedContent = articleResult.content
             .replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
             .trim();
@@ -270,9 +352,6 @@ export class AutonomousPipelineService {
           });
           await content.save();
 
-          // Deduct word credits using the model's own method — handles
-          // subscriptionWordBalance → topupWordBalance → wordCredits priority,
-          // currentMonthUsage, and wordUsageHistory correctly.
           const user = await User.findById(config.userId);
           if (user) {
             await user.deductWordCredits(

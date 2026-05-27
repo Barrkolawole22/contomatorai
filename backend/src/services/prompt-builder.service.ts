@@ -10,6 +10,53 @@ export type ContentMode =
   | 'opinion'
   | 'listicle';
 
+export type ImpactFormat =
+  | 'rate_change_alert'
+  | 'policy_shift'
+  | 'price_hike_survival'
+  | 'feature_removal_warning'
+  | 'new_law_breakdown'
+  | 'scam_fraud_alert'
+  | 'product_recall_guide'
+  | 'market_crash_explainer'
+  | 'subscription_trap'
+  | 'comparison_flip'
+  | 'deadline_reminder'
+  | 'hidden_cost_revealer'
+  | 'upgrade_decision'
+  | 'data_breach_response'
+  | 'trend_reality_check'
+  | 'beginner_entry_point'
+  | 'contract_renewal_audit'
+  | 'seasonal_timing_guide'
+  | 'myth_buster'
+  | 'risk_explainer';
+
+// Maps each impact format to its appropriate base content mode.
+// Used by autonomous-pipeline to set contentMode when an impact format is detected.
+export const IMPACT_FORMAT_MODE: Record<ImpactFormat, ContentMode> = {
+  rate_change_alert:       'seo_blog',
+  policy_shift:            'news',
+  price_hike_survival:     'seo_blog',
+  feature_removal_warning: 'seo_blog',
+  new_law_breakdown:       'news',
+  scam_fraud_alert:        'news',
+  product_recall_guide:    'seo_blog',
+  market_crash_explainer:  'news',
+  subscription_trap:       'seo_blog',
+  comparison_flip:         'commercial',
+  deadline_reminder:       'seo_blog',
+  hidden_cost_revealer:    'seo_blog',
+  upgrade_decision:        'commercial',
+  data_breach_response:    'news',
+  trend_reality_check:     'opinion',
+  beginner_entry_point:    'seo_blog',
+  contract_renewal_audit:  'seo_blog',
+  seasonal_timing_guide:   'seo_blog',
+  myth_buster:             'opinion',
+  risk_explainer:          'seo_blog',
+};
+
 type OpeningStyle =
   | 'anecdote'
   | 'stat'
@@ -36,6 +83,8 @@ interface InternalLink {
 
 interface PromptOptions {
   contentMode?: ContentMode;
+  impactFormat?: ImpactFormat;
+  niche?: string;
   tone?: string;
   writingStyle?: string;
   wordCount?: number;
@@ -76,6 +125,7 @@ export class PromptBuilderService {
 
   private resolveMode(options: PromptOptions): ContentMode {
     if (options.contentMode) return options.contentMode;
+    if (options.impactFormat) return IMPACT_FORMAT_MODE[options.impactFormat];
     switch (options.writingStyle) {
       case 'journalistic': return 'news';
       case 'academic':     return 'academic';
@@ -116,6 +166,7 @@ export class PromptBuilderService {
     const openingStyle = this.resolveOpeningStyle(keyword, mode);
     const persona = this.resolvePersona(keyword, mode);
     const targetWordCount = options.wordCount || this.modeDefaults(mode).wordCount;
+    const useImpactFormat = !!options.impactFormat;
     let prompt = '';
 
     prompt += this.buildPersonaBlock(persona, mode, keyword);
@@ -142,8 +193,14 @@ Do NOT invent facts. If the source is thin, keep claims conservative.
     prompt += this.buildHumanSignalsBlock(mode, options);
     prompt += this.buildOpeningStyleBlock(openingStyle, mode, keyword);
     prompt += this.buildWritingRulesBlock(mode, options);
-    prompt += this.buildHeadlineBlock(mode);
-    prompt += this.buildStructureBlock(mode, options);
+
+    // Impact format replaces headline + structure blocks entirely
+    if (useImpactFormat) {
+      prompt += this.buildImpactFormatBlock(options.impactFormat!, keyword, options.niche);
+    } else {
+      prompt += this.buildHeadlineBlock(mode);
+      prompt += this.buildStructureBlock(mode, options);
+    }
 
     if (options.articleImages?.length) {
       prompt += `IMAGES — YOU MUST INCLUDE THESE:
@@ -173,11 +230,14 @@ ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="$
     if (options.includeComparisons) {
       prompt += `COMPARISONS: Compare directly where it adds real value. Name the alternatives. Don't hedge.\n\n`;
     }
-    if (options.includeFAQ) {
+    if (!useImpactFormat && options.includeFAQ) {
       prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would type into Google. Answer each directly in plain language. No padding.\n\n`;
     }
 
-    prompt += this.buildConclusionBlock(mode, options);
+    // Impact format articles close with FAQ — no separate conclusion block needed
+    if (!useImpactFormat) {
+      prompt += this.buildConclusionBlock(mode, options);
+    }
 
     prompt += `HTML FORMATTING:
 - <h1> headline (ONE only — never repeat in the body)
@@ -209,6 +269,407 @@ ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="$
 
     prompt += `Now write the complete article. Start with <h1>.\n`;
     return prompt;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // NICHE CONTEXT RESOLVER
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private getNicheContext(niche?: string): { actor: string; consumer: string; unit: string } {
+    const n = (niche || '').toLowerCase();
+    if (/financ|bank|invest|loan|credit|insur|mortgage/.test(n))
+      return { actor: 'bank, lender, or financial institution', consumer: 'account holder, borrower, or investor', unit: 'interest rate, fee, or yield' };
+    if (/tech|saas|software|app|platform|startup/.test(n))
+      return { actor: 'software company or platform', consumer: 'user or subscriber', unit: 'subscription price or feature' };
+    if (/health|medical|fitness|wellness|pharma/.test(n))
+      return { actor: 'provider, insurer, or manufacturer', consumer: 'patient, member, or user', unit: 'cost, coverage, or tracked metric' };
+    if (/travel|airline|hotel|hospitality|tourism/.test(n))
+      return { actor: 'airline, hotel chain, or booking platform', consumer: 'traveler or loyalty member', unit: 'fee, points value, or booking policy' };
+    if (/legal|law|regulat|compliance|court/.test(n))
+      return { actor: 'regulator, court, or legislature', consumer: 'individual, business owner, or professional', unit: 'compliance requirement or legal right' };
+    if (/gaming|game|hardware|console/.test(n))
+      return { actor: 'developer or hardware manufacturer', consumer: 'player or buyer', unit: 'in-game mechanic, price, or hardware spec' };
+    if (/real estate|property|housing/.test(n))
+      return { actor: 'lender, developer, or regulator', consumer: 'buyer, renter, or homeowner', unit: 'mortgage rate, price, or policy' };
+    if (/education|exam|school|university|jamb|waec/.test(n))
+      return { actor: 'institution, board, or platform', consumer: 'student or parent', unit: 'fee, policy, or exam requirement' };
+    return { actor: 'company or provider', consumer: 'customer or user', unit: 'price, feature, or policy' };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // IMPACT FORMAT BLOCK — replaces headline + structure for all 20 formats
+  // ═══════════════════════════════════════════════════════════════════════
+
+  private buildImpactFormatBlock(format: ImpactFormat, keyword: string, niche?: string): string {
+    const ctx = this.getNicheContext(niche);
+    const nicheHint = `NICHE CONTEXT: The entity in this story is a ${ctx.actor}. The reader is a ${ctx.consumer}. The key variable is the ${ctx.unit}.\n\n`;
+
+    const blocks: Record<ImpactFormat, string> = {
+
+      rate_change_alert: `IMPACT FORMAT — RATE CHANGE ALERT
+Headline: "[Entity] Just [Raised/Cut] Its [Rate/Fee]: What It Means for Your [Wallet/Account]" — under 12 words, lead with the change not the entity.
+
+H2: What Just Changed
+  Bullet list: old rate → new rate, exact effective date, who's affected and who isn't.
+H2: Does This Help or Hurt You?
+  Direct verdict. No hedging. Quantify the impact in real terms (e.g., "₦12,000 more per year on a ₦500,000 balance").
+H2: What to Do Before [Deadline]
+  3–4 numbered actions, most urgent first. Be specific — name products, steps, deadlines.
+H2: Better Options Right Now
+  3 named alternatives with one sentence each on why they're worth switching to now.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Real panic questions. 2–3 sentences per answer. Plain English.
+
+Tone: Urgent but grounded. Lead with numbers. Every claim traces to the source material.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      policy_shift: `IMPACT FORMAT — POLICY SHIFT EXPLAINER
+Headline: "[Body/Company] Just Changed the Rules on [Topic]: Here's What Actually Changes for You" — under 12 words.
+
+H2: The New Rule in Plain English
+  No jargon. One clear paragraph explaining what it does, not what it's called.
+H2: What Changes for You (and When)
+  Specific date, specific impact. Distinguish: affected now vs. later vs. not at all.
+H2: What to Do Before It Takes Effect
+  Step-by-step, ordered by urgency. Only include "do nothing" if that's genuinely safe.
+H2: What Happens If You Don't Act
+  Plain consequences. Not dramatic — just accurate.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Questions a confused consumer would actually type into Google.
+
+Tone: Clear and authoritative. Report the impact. Do not editorialize about whether the policy is good or bad.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      price_hike_survival: `IMPACT FORMAT — PRICE HIKE SURVIVAL GUIDE
+Headline: "[Company] Is Raising [Price] by [Amount]: How to Lock In the Old Rate or Find Something Better"
+
+H2: How Much More You'll Pay
+  Monthly and annual cost increase calculated. Who gets hit immediately vs. at renewal.
+H2: How to Lock In the Current Price
+  Specific steps: prepay, lock plan, use grandfathered option — whatever applies. Include the deadline if there is one.
+H2: Is It Still Worth Paying More?
+  Honest verdict. What you're getting vs. what it now costs. Pick a side.
+H2: 3 Alternatives That Cost Less Right Now
+  Named products or strategies. One sentence on why each is worth switching to.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. 2–3 sentences per answer.
+
+Tone: Practical. Help the reader keep money in their pocket.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      feature_removal_warning: `IMPACT FORMAT — FEATURE REMOVAL WARNING
+Headline: "[Platform] Is Removing [Feature]: What to Do Before [Date]" — specific, no vagueness about timing.
+
+H2: What Exactly Is Being Removed (and When)
+  The feature explained simply. Exact date. Exact scope of what disappears.
+H2: Who This Affects
+  Free vs. paid users, which plan tiers, which regions. Be specific.
+H2: How to Replace It
+  Workarounds within the platform first, then external tools that do the same job. Name them.
+H2: Should You Stay or Switch?
+  Honest verdict based on what the removed feature was actually worth.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Problem-solving, not complaining. You're here to help the reader adapt.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      new_law_breakdown: `IMPACT FORMAT — NEW LAW BREAKDOWN
+Headline: "[New Law] Just Passed: What It Means for [Everyday People / Businesses / Consumers]"
+
+H2: What the Law Actually Says (In Plain English)
+  No legal jargon. One paragraph. What it does, not what it's called or who sponsored it.
+H2: Who It Affects (and Who It Doesn't)
+  Specific: individuals vs. businesses, income thresholds, industry scope, which regions.
+H2: The Practical Changes You'll Notice
+  Day-to-day impact. What looks different starting [date]?
+H2: What You Need to Do Now
+  Concrete steps. If no action is needed, say so clearly — don't pad.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Genuine confusion questions from the people this affects.
+
+Tone: Informative, not partisan. Report the impact. Do not editorialize about whether the law is good or bad.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      scam_fraud_alert: `IMPACT FORMAT — SCAM / FRAUD ALERT
+Headline: "The [Scam Type] Scam Targeting [Audience]: How to Spot It and Protect Yourself"
+
+H2: How This Scam Works (Step by Step)
+  The sequence. Be specific — abstract descriptions don't protect anyone.
+H2: The Red Flags to Watch For
+  Bullet list of specific warning signs. Real signals, not generic "be careful" advice.
+H2: What to Do If You've Already Been Targeted
+  Immediate steps in order. Specific contacts, actions, and timelines.
+H2: How to Protect Yourself Going Forward
+  Preventative measures: specific tools, settings, or habits to adopt now.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Questions a panicked reader would actually type.
+
+Tone: Calm and practical. You're a knowledgeable friend helping someone not get ripped off. Never sensationalize.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      product_recall_guide: `IMPACT FORMAT — PRODUCT RECALL GUIDE
+Headline: "[Product] Has Been Recalled: Here's Whether You're Affected and What to Do"
+
+H2: Which Products Are Affected
+  Model numbers, serial ranges, batch codes, purchase date range. Where it was sold.
+H2: What the Risk Is
+  Plain description of the hazard. No minimization. No panic. Just the confirmed facts.
+H2: How to Check If You Own One
+  Step-by-step instructions to identify an affected unit.
+H2: What to Do Now
+  Return process, replacement process, or stop-use instructions. Who to contact and how.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Precise and calm. This is safety information. No padding, no filler.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      market_crash_explainer: `IMPACT FORMAT — MARKET CRASH EXPLAINER
+Headline: "What Just Happened in [Market]: What It Actually Means for Your [Savings/Investments/Prices]"
+
+H2: What Happened (The Short Version)
+  Cause, sequence, and scale. Plain English. Specific numbers where available.
+H2: What This Means for You Specifically
+  Savings, pensions, mortgages, consumer prices — whichever apply. Short-term noise vs. long-term signal.
+H2: What to Do (and What Not to Do)
+  Practical guidance. Earn the "don't panic" advice with evidence — don't just assert it.
+H2: What to Watch in the Coming Days
+  The specific indicators, dates, or decisions that will determine what happens next.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Steady and fact-based. The reader is anxious — acknowledge that without amplifying it.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      subscription_trap: `IMPACT FORMAT — SUBSCRIPTION TRAP DETECTOR
+Headline: "The Real Cost of [Service]: Hidden Fees Most [Company] Subscribers Don't Know About"
+
+H2: The Advertised Price vs. What You Actually Pay
+  Base price, add-ons, taxes, mandatory extras. Annual total clearly stated.
+H2: The Fees Most People Don't Notice Until It's Too Late
+  Specific line items. Named. Explained. Where to find them in the terms.
+H2: How to Reduce What You Pay
+  Specific tactics: downgrade, negotiate, cancel-and-rejoin, annual vs. monthly billing.
+H2: Alternatives With Transparent Pricing
+  3 alternatives with their actual all-in costs stated plainly.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Investigative consumer advocacy. Not hostile — just honest about the math.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      comparison_flip: `IMPACT FORMAT — COMPARISON FLIP
+Headline: "Everyone Picks [Option A]. Here's Why [Option B] Is the Smarter Choice Right Now"
+
+H2: Why People Default to [Option A]
+  A fair, honest account of how Option A earned its reputation. Don't strawman it.
+H2: What's Changed (Why This Matters Now)
+  The specific recent development that shifts the calculation in Option B's favour.
+H2: How [Option B] Wins Today
+  Head-to-head on the dimensions that matter most. Specific numbers or features, not vague claims.
+H2: When [Option A] Still Wins
+  Intellectual honesty: the specific scenarios where the conventional choice remains right.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Confident but fair. Making a case for Option B, not attacking Option A.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      deadline_reminder: `IMPACT FORMAT — DEADLINE REMINDER
+Headline: "You Have Until [Date] to [Action]: Here's Exactly What to Do" — specific date, specific action.
+
+H2: What the Deadline Is (and What Happens If You Miss It)
+  Exact date. Exact consequences. No vagueness.
+H2: Who This Applies To
+  Eligibility, scope, exclusions. Specific.
+H2: Step-by-Step: How to Complete This Before the Deadline
+  Numbered steps. Include estimated time per step where relevant.
+H2: What If You've Already Missed It?
+  Late options, appeals, penalties, or grace periods — whatever applies from the source material.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Urgent and actionable. This article's job is to get the reader to do something specific.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      hidden_cost_revealer: `IMPACT FORMAT — HIDDEN COST REVEALER
+Headline: "The True Cost of [Product/Service]: What You'll Actually Pay Over [Time Period]"
+
+H2: The Advertised Price vs. The Real Price
+  What the company says it costs vs. what you actually pay.
+H2: All the Costs They Don't Lead With
+  Setup, maintenance, consumables, mandatory accessories, renewal rates. Named and explained.
+H2: The Full Cost Breakdown
+  A calculated total: monthly × 12, or a multi-year projection. Plain numbers, not percentages.
+H2: Is It Worth the Real Price?
+  Honest assessment. What you get for that total. Direct verdict.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Transparent and methodical. Do the math the company hopes the reader won't do.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      upgrade_decision: `IMPACT FORMAT — UPGRADE DECISION GUIDE
+Headline: "Should You Upgrade to [New Version/Product] Right Now? The Honest Answer"
+
+H2: What's Actually New
+  Changes that matter in real-world use. Skip the spec sheet. Focus on practical impact.
+H2: Who Should Upgrade Now
+  Specific user profiles: current version, primary use case, budget. Be direct.
+H2: Who Should Wait
+  Specific reasons to hold off: upcoming release, current version still capable, price drop likely.
+H2: The Cost of Upgrading vs. The Cost of Waiting
+  Real numbers where available. Framed around value, not just price.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Honest and direct. Help the reader make a good decision — not push them toward an upgrade.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      data_breach_response: `IMPACT FORMAT — DATA BREACH RESPONSE
+Headline: "[Company] Data Breach: If Your Data Was Exposed, Do These [N] Things Now"
+
+H2: What Was Exposed (and What Wasn't)
+  Confirmed data types only: email, passwords, payment info, etc. Do not speculate beyond confirmed reports.
+H2: How to Find Out If You're Affected
+  Specific steps: official breach checker, notification email, account review instructions.
+H2: What to Do Right Now (In This Order)
+  Numbered, prioritized steps. Password change, credit freeze, 2FA setup — most urgent first.
+H2: What to Watch for Over the Next 90 Days
+  Phishing patterns, fraudulent account openings, suspicious activity signs to monitor.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Calm and practical. The reader may be panicking — give them a clear list and let that do the reassuring.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      trend_reality_check: `IMPACT FORMAT — TREND REALITY CHECK
+Headline: "Is [Trending Claim] Actually True? Here's What the Evidence Shows"
+
+H2: The Claim (What People Are Saying)
+  Represent the viral version fairly. Do not strawman it.
+H2: What the Evidence Actually Shows
+  Data, studies, track records. Specific sources. Distinguish confirmed, mixed, and unsupported elements.
+H2: Why This Claim Spread
+  The grain of truth. Why it resonated. What people got partially right.
+H2: What This Means for Your Decisions
+  Practical implication: how should this change — or not change — what the reader does?
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Analytically honest. Not debunking for sport — genuinely trying to leave the reader better informed.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      beginner_entry_point: `IMPACT FORMAT — BEGINNER ENTRY POINT
+Headline: "New to [Topic]? Here's Exactly Where to Start (And What to Ignore at First)"
+
+H2: What [Topic] Actually Is
+  No jargon, no history. One clear paragraph: what it is and why it exists.
+H2: What Beginners Usually Get Wrong First
+  Name the most common first mistake or misconception directly. Don't soften it.
+H2: The Three Things to Understand Before Anything Else
+  Three numbered <h3> subsections. One foundational concept each. Maximum 4 sentences per subsection.
+H2: Your First Practical Step
+  The one thing to do today. Specific. Achievable. Not a reading list.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Questions that reflect genuine beginner confusion.
+
+Tone: Patient, direct, non-condescending. Explain clearly without making the reader feel foolish for not knowing.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      contract_renewal_audit: `IMPACT FORMAT — CONTRACT RENEWAL AUDIT
+Headline: "Is Your [Contract/Plan/Subscription] Still Worth It? A Renewal Audit"
+
+H2: What You're Paying Now vs. What You Were Promised
+  The original deal vs. current reality. Any price creep, feature changes, or service degradation.
+H2: What You'd Get If You Switched Today
+  Best current alternatives, specific and directly comparable to the current plan.
+H2: The Real Cost of Switching
+  Honest calculation: cancellation fees, data migration time, re-learning curve.
+H2: The Verdict: Renew, Renegotiate, or Switch
+  Three options laid out clearly. A direct recommendation with the reasoning.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Methodical and honest. Help the reader think clearly — not push them toward a switch.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      seasonal_timing_guide: `IMPACT FORMAT — SEASONAL TIMING GUIDE
+Headline: "The Best (and Worst) Time to [Buy/Apply for/Act on] [Topic]: A Timing Guide"
+
+H2: Why Timing Matters for [Topic]
+  The specific reason timing affects price, quality, or outcome. Data-backed where available.
+H2: The Best Window to Act
+  Specific months, conditions, or triggers. Not vague "when it's on sale" — name the pattern.
+H2: When to Avoid It
+  The periods where you're most likely to overpay, underperform, or face obstacles.
+H2: How to Prepare If the Right Window Isn't Open Yet
+  What to do now so you're positioned when the right time comes.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Practical and specific. Generalizations are worthless here — the reader wants a date, range, or clear signal.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      myth_buster: `IMPACT FORMAT — MYTH BUSTER
+Headline: "The [Topic] Myth That's Costing People [Money/Time/Opportunities]: What's Actually True"
+
+H2: The Myth (What Most People Believe)
+  State it charitably. This was a belief that made sense at some point or in some context.
+H2: Where the Myth Came From
+  The origin: outdated data, misunderstood study, marketing, media shorthand.
+H2: What the Evidence Actually Shows
+  Specific data, studies, track records. Named sources.
+H2: The Better Mental Model
+  A replacement framework — not just "you were wrong," but something more accurate to use going forward.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Respectful. Offering something better, not mocking anyone for a reasonable mistake.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      risk_explainer: `IMPACT FORMAT — RISK EXPLAINER
+Headline: "Before You [Do/Buy/Sign Up for] [Topic]: The Risks Most People Discover Too Late"
+
+H2: What Most People Assume When They [Action]
+  The default mental model and why it's incomplete or misleading.
+H2: The Real Risks
+  3–5 specific, evidenced risks. For each: what it is, how likely, how bad if it happens.
+  Use a numbered <h3> per risk if there are more than 3.
+H2: Who Is Most at Risk (and Who Is Probably Fine)
+  Honest segmentation. Do not universalize the risk. Do not minimize it either.
+H2: How to Reduce the Risk Without Abandoning the Idea
+  Mitigation strategies. Specific. Actionable.
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags.
+
+Tone: Balanced and honest. Help the reader go in with open eyes — not scared off, just informed.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+    };
+
+    return `IMPACT FORMAT ENGAGED — override standard headline and structure:\n\n${nicheHint}${blocks[format]}\n`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
