@@ -140,7 +140,7 @@ export class RSSService {
     return title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 60);
   }
 
-  // Step 1: broad country registry ───────────────────────────────────────────
+  // Step 1: broad country registry — only used when no specific topic is detected
   private async _fetchCountryRegistry(
     country: PipelineCountry,
     windowHours: number,
@@ -177,7 +177,7 @@ export class RSSService {
     return pool;
   }
 
-  // Step 2: topic-specific supplement ───────────────────────────────────────
+  // Step 2: topic-specific supplement
   private async _fetchSupplement(
     country: PipelineCountry,
     topic: string,
@@ -269,6 +269,26 @@ export class RSSService {
     const topic = detectTopic(relevanceTopics, niches);
     logger.info(`RSS: country="${country}", topic="${topic}", niches=[${niches.join(', ')}]`);
 
+    // When a specific topic is detected, skip the broad country registry entirely.
+    // Step 1 only floods the pool with general news that the AI gate will reject.
+    if (topic !== 'general') {
+      logger.info(`RSS: topic "${topic}" detected — skipping step 1, going straight to topic feeds`);
+      const supplement = await this._fetchSupplement(
+        country, topic, niches, relevanceTopics,
+        windowHours, totalLimit, new Set()
+      );
+
+      if (supplement.length === 0 && windowHours <= 24) {
+        logger.warn(`RSS: nothing in ${windowHours}h window — retrying with 72h`);
+        return this.fetchItemsForNiches(niches, totalLimit, 72, relevanceTopics, country);
+      }
+
+      return supplement
+        .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+        .slice(0, totalLimit);
+    }
+
+    // No topic signal — use broad country registry, supplement if needed
     const registry = await this._fetchCountryRegistry(country, windowHours, totalLimit);
     if (registry.length >= totalLimit) {
       return registry
