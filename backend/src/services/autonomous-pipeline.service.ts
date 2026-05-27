@@ -62,24 +62,28 @@ async function aiRelevanceCheck(
       : country === 'GB' ? 'the United Kingdom'
       : country;
 
-    const relevanceSection = `You are a content relevance filter. Your job is to decide if a news article is worth publishing on a website.
+    const relevanceSection = `You are a content quality gate for a website.
 
 This website covers: ${relevanceTopics.join(', ')}
 The site's specific content areas include: ${niches.join(', ')}
 This site focuses on content from: ${countryLabel}
 
-ANSWER YES if the article is about ANY of the following:
-- The exact topics listed above, or anything clearly related to them
-- People, institutions, policies, or events within those topic areas
-- News, updates, research, or developments in those fields
-- Any article where a reader interested in "${relevanceTopics.join(' or ')}" would find it useful
+Your job is NOT to check if an article mentions topics related to these areas in passing.
+Your job is to check if the article's SUBSTANCE — what it is actually about — directly deals with the core of these topics.
 
-ANSWER NO if the article has no connection to the topics above, OR if it is clearly about a different country than the one this site focuses on.
-Exception: global/international news relevant to the topic is always acceptable.
-When in doubt, answer YES.
+ANSWER YES only if the article's primary subject matter is substantively about one of the configured topics. Ask yourself: would someone who comes to this site specifically for "${relevanceTopics.join(' or ')}" content find this article directly useful and on-topic — not merely tangentially related?
+
+ANSWER NO if:
+- The article only mentions the topic in passing while being primarily about something else
+- A relevant institution or person is mentioned but the substance is off-topic (e.g. an electoral official giving a speech about integrity is not a law article)
+- The connection to the topic requires a stretch of reasoning
+- The article is general news that happens to involve a sector covered by this site
+- The article is clearly about a different country than ${countryLabel}, unless the news is global or international in nature and directly relevant to the topic
+
+The test: if a regular reader would scroll past it as "not what I came here for", answer NO.
 
 Article title: "${title}"
-Article description: "${description || '(none)'}"`;
+Article description: "${description || '(none)'}"`
 
     const formatSection = classifyFormat ? `
 
