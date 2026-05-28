@@ -1,9 +1,6 @@
 // backend/src/config/feed-registry.ts
 export type PipelineCountry = 'NG' | 'US' | 'GB' | 'AU' | 'CA' | 'ZA' | 'IN' | 'Global';
 
-// ─── Country base config ──────────────────────────────────────────────────────
-// registry: general country-level outlets (no topic filter — broad national news)
-// fallback: international sources used only when registry is thin
 export const COUNTRY_CONFIG: Record<PipelineCountry, {
   gl: string;
   ceid: string;
@@ -45,7 +42,6 @@ export const COUNTRY_CONFIG: Record<PipelineCountry, {
       'https://feeds.bbci.co.uk/news/uk/rss.xml',
       'https://www.theguardian.com/uk/rss',
       'https://feeds.skynews.com/feeds/rss/uk.xml',
-      'https://www.telegraph.co.uk/rss.xml',
     ],
     fallback: [
       'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -55,9 +51,8 @@ export const COUNTRY_CONFIG: Record<PipelineCountry, {
     gl: 'AU', ceid: 'AU:en',
     registry: [
       'https://www.abc.net.au/news/feed/51120/rss.xml',
-      'https://feeds.smh.com.au/rssheadlines/breaking.xml',
+      'https://www.smh.com.au/rss/feed.xml',
       'https://www.theaustralian.com.au/feed/',
-      'https://www.news.com.au/content-feeds/latest-news-national/',
     ],
     fallback: [
       'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -66,9 +61,8 @@ export const COUNTRY_CONFIG: Record<PipelineCountry, {
   CA: {
     gl: 'CA', ceid: 'CA:en',
     registry: [
-      'https://rss.cbc.ca/lineup/topstories.xml',
+      'https://www.cbc.ca/cmlink/rss-topstories',
       'https://globalnews.ca/feed/',
-      'https://www.thestar.com/content/thestar/feed.rss',
       'https://nationalpost.com/feed/',
     ],
     fallback: [
@@ -78,7 +72,7 @@ export const COUNTRY_CONFIG: Record<PipelineCountry, {
   ZA: {
     gl: 'ZA', ceid: 'ZA:en',
     registry: [
-      'https://www.dailymaverick.co.za/feed/',
+      'https://www.dailymaverick.co.za/dmrss/',
       'https://ewn.co.za/RSS%20Feeds/Latest%20News',
       'https://www.news24.com/rss',
       'https://www.timeslive.co.za/rss/',
@@ -112,501 +106,487 @@ export const COUNTRY_CONFIG: Record<PipelineCountry, {
   },
 };
 
-// ─── Country-specific topic feeds ─────────────────────────────────────────────
-// Tried before generic TOPIC_REGISTRY so the AI gate sees local, on-topic content.
-// Add new countries/topics here — the service picks them up automatically.
 export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Record<string, string[]>>>> = {
   NG: {
     law: [
-      'https://thenigerialawyer.com/feed/',
-      'https://lawyard.com/feed/',
-      'https://www.lawpavilion.com/blog/feed/',
-      'https://legalnaija.com/feed/',
-      'https://lawlordng.com/feed/',
+      'https://barristerng.com/feed/',
+      'https://www.courtroommail.com/feed/',
+      'https://dnllegalandstyle.com/feed/',
+      'https://lawyard.ng/feed/',
+      'https://www.premiumtimesng.com/category/news/law/feed/',
     ],
     finance: [
       'https://nairametrics.com/feed/',
-      'https://www.proshareng.com/rss/news.xml',
-      'https://techeconomy.ng/feed/',
-      'https://businessday.ng/feed/',
-      'https://www.thisdaylive.com/index.php/category/business/feed/',
+      'https://businessday.ng/category/business-economy/feed/',
+      'https://www.premiumtimesng.com/category/business/feed/',
+      'https://proshare.co/feed/',
+      'https://nairametrics.com/category/financial-literacy-for-nigerians/personal-finance/feed/',
     ],
     technology: [
       'https://techcabal.com/feed/',
       'https://techpoint.africa/feed/',
-      'https://technext24.com/feed/',
-      'https://www.techuncode.com/feed/',
-      'https://africanews.tech/feed/',
+      'https://rss.punchng.com/v1/category/technology',
+      'https://www.vanguardngr.com/category/technology/feed/',
+      'https://guardian.ng/category/technology/feed/',
     ],
     health: [
-      'https://healthwise.punchng.com/feed/',
+      'https://rss.punchng.com/v1/category/health',
+      'https://www.premiumtimesng.com/category/news/health/feed/',
       'https://www.vanguardngr.com/category/health/feed/',
-      'https://guardian.ng/category/life/health/feed/',
       'https://thenationonlineng.net/category/health/feed/',
     ],
     education: [
+      'https://rss.punchng.com/v1/category/education',
       'https://www.vanguardngr.com/category/education/feed/',
-      'https://punchng.com/category/education/feed/',
+      'https://dailypost.ng/education/feed/',
       'https://guardian.ng/category/features/education/feed/',
-      'https://thenationonlineng.net/category/education/feed/',
-      'https://dailypost.ng/category/education/feed/',
     ],
     politics: [
-      'https://www.premiumtimesng.com/category/news/politics/feed/',
-      'https://punchng.com/category/politics/feed/',
-      'https://guardian.ng/category/news/politics/feed/',
-      'https://dailypost.ng/category/politics/feed/',
+      'https://rss.punchng.com/v1/category/politics',
       'https://www.vanguardngr.com/category/politics/feed/',
+      'https://www.premiumtimesng.com/category/news/politics/feed/',
+      'https://thenationonlineng.net/category/politics/feed/',
+      'https://dailypost.ng/politics/feed/',
     ],
     business: [
-      'https://businessday.ng/feed/',
-      'https://nairametrics.com/feed/',
-      'https://guardian.ng/category/business-services/business/feed/',
-      'https://www.vanguardngr.com/category/businesses/feed/',
-      'https://www.thisdaylive.com/index.php/category/business/feed/',
+      'https://rss.punchng.com/v1/category/business',
+      'https://www.vanguardngr.com/category/business/feed/',
+      'https://guardian.ng/category/business/feed/',
+      'https://thenationonlineng.net/category/business/feed/',
+      'https://dailypost.ng/business/feed/',
     ],
     sports: [
-      'https://www.completesports.com/feed/',
+      'https://rss.punchng.com/v1/category/sports',
+      'https://www.vanguardngr.com/category/sports/feed/',
+      'https://dailypost.ng/sport/feed/',
       'https://guardian.ng/category/sport/feed/',
       'https://thenationonlineng.net/category/sports/feed/',
-      'https://punchng.com/category/sports/feed/',
-      'https://www.vanguardngr.com/category/sports/feed/',
     ],
     entertainment: [
-      'https://www.bellanaija.com/feed/',
-      'https://guardian.ng/category/art-and-life/feed/',
+      'https://rss.punchng.com/v1/category/entertainment',
       'https://www.vanguardngr.com/category/entertainment/feed/',
-      'https://punchng.com/category/entertainment/feed/',
-      'https://thenationonlineng.net/category/entertainment/feed/',
+      'https://dailypost.ng/entertainment/feed/',
+      'https://www.premiumtimesng.com/category/entertainment/feed/',
+      'https://www.bellanaija.com/feed/',
     ],
     realestate: [
-      'https://businessday.ng/real-estate/feed/',
+      'https://www.vanguardngr.com/category/homes-property/feed/',
       'https://guardian.ng/category/property/feed/',
-      'https://www.vanguardngr.com/category/real-estate/feed/',
+      'https://businessday.ng/category/real-estate/feed/',
     ],
     agriculture: [
-      'https://guardian.ng/category/agriculture/feed/',
-      'https://www.vanguardngr.com/category/agriculture/feed/',
-      'https://dailypost.ng/category/agriculture/feed/',
-      'https://businessday.ng/agro-allied/feed/',
+      'https://businessday.ng/category/agriculture/feed/',
+      'https://nairametrics.com/category/agriculture/feed/',
+      'https://www.premiumtimesng.com/category/agriculture/feed/',
+      'https://guardian.ng/category/features/agro-care/feed/',
     ],
     energy: [
-      'https://guardian.ng/category/energy/feed/',
-      'https://businessday.ng/energy/feed/',
-      'https://www.vanguardngr.com/category/energy/feed/',
-      'https://nairametrics.com/category/energy/feed/',
+      'https://www.vanguardngr.com/category/sweet-crude/feed/',
+      'https://businessday.ng/category/energy/feed/',
+      'https://sweetcrudereports.com/feed/',
+      'https://www.premiumtimesng.com/category/business/energy/feed/',
     ],
     travel: [
-      'https://guardian.ng/category/travel/feed/',
-      'https://thenationonlineng.net/category/travel/feed/',
+      'https://www.vanguardngr.com/category/travel-tourism/feed/',
+      'https://guardian.ng/category/life/travel/feed/',
+      'https://businesspost.ng/category/travel/feed/',
     ],
     religion: [
-      'https://dailypost.ng/category/religion/feed/',
+      'https://www.vanguardngr.com/category/worship/feed/',
+      'https://dailypost.ng/religion/feed/',
       'https://thenationonlineng.net/category/religion/feed/',
     ],
   },
 
   US: {
     law: [
-      'https://www.scotusblog.com/feed/',
-      'https://www.lawfaremedia.org/rss.xml',
-      'https://abovethelaw.com/feed/',
-      'https://legaltimes.typepad.com/blt/atom.xml',
-      'https://www.abajournal.com/news/rss',
+      'https://legalreader.com/feed/',
+      'https://www.abajournal.com/feeds/rss/',
+      'https://rss.nytimes.com/services/xml/rss/nyt/Law.xml',
     ],
     finance: [
-      'https://feeds.bloomberg.com/markets/news.rss',
-      'https://www.wsj.com/xml/rss/3_7085.xml',
-      'https://fortune.com/feed/',
-      'https://www.ft.com/?format=rss',
+      'https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml',
+      'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
       'https://feeds.reuters.com/reuters/businessNews',
     ],
     technology: [
-      'https://techcrunch.com/feed/',
-      'https://www.theverge.com/rss/index.xml',
-      'https://arstechnica.com/feed/',
-      'https://www.wired.com/feed/rss',
-      'https://feeds.feedburner.com/venturebeat/SZYF',
+      'https://www.cnet.com/rss/news/',
+      'https://feeds.arstechnica.com/arstechnica/index',
+      'https://gizmodo.com/rss',
+      'https://feeds.feedburner.com/TechCrunch',
     ],
     health: [
-      'https://www.statnews.com/feed/',
       'https://rss.nytimes.com/services/xml/rss/nyt/Health.xml',
-      'https://www.healthline.com/rss/news',
-      'https://feeds.webmd.com/rss/rss.aspx?RSSSource=RSS_PUBLIC',
+      'https://www.npr.org/rss/rss.php?id=1128',
+      'https://www.medpagetoday.com/rss/Headlines.xml',
     ],
     education: [
-      'https://www.insidehighered.com/rss.xml',
+      'https://www.edweek.org/feed/',
       'https://rss.nytimes.com/services/xml/rss/nyt/Education.xml',
-      'https://www.edweek.org/rss.xml',
-      'https://chronicle.com/rss',
     ],
     politics: [
+      'https://rss.politico.com/politics-news.xml',
       'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml',
-      'https://www.politico.com/rss/politicopicks.xml',
-      'https://feeds.washingtonpost.com/rss/politics',
-      'https://thehill.com/rss/syndicator/19109/feed/',
+      'https://feeds.foxnews.com/foxnews/politics',
     ],
     business: [
+      'https://feeds.washingtonpost.com/rss/business',
       'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
-      'https://feeds.reuters.com/reuters/businessNews',
-      'https://fortune.com/feed/',
     ],
     sports: [
       'https://www.espn.com/espn/rss/news',
       'https://sports.yahoo.com/rss/',
-      'https://www.cbssports.com/rss/headlines/',
+      'https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml',
     ],
     entertainment: [
-      'https://variety.com/feed/',
-      'https://deadline.com/feed/',
-      'https://www.hollywoodreporter.com/feed/',
-      'https://ew.com/feed/',
+      'https://tv.avclub.com/rss',
+      'https://www.tvfanatic.com/rss.xml',
+      'https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml',
     ],
     realestate: [
-      'https://www.inman.com/feed/',
-      'https://www.housingwire.com/feed/',
       'https://rss.nytimes.com/services/xml/rss/nyt/RealEstate.xml',
+      'https://www.realtor.com/news/feed/',
+    ],
+    agriculture: [
+      'https://www.agweb.com/rss/news',
+      'https://www.usda.gov/rss/home.xml',
+    ],
+    energy: [
+      'https://www.eia.gov/rss/todayinenergy.xml',
+      'https://www.power-eng.com/feed/',
     ],
     travel: [
       'https://rss.nytimes.com/services/xml/rss/nyt/Travel.xml',
-      'https://www.travelandleisure.com/rss.xml',
-      'https://condnast.com/travel/rss',
+      'https://www.nomadicmatt.com/travel-blog/feed/',
+      'https://www.lonelyplanet.com/news/feed/atom/',
     ],
-    food: [
-      'https://feeds.feedburner.com/seriouseats/recipes',
-      'https://rss.nytimes.com/services/xml/rss/nyt/DiningandWine.xml',
-    ],
-    science: [
-      'https://feeds.newscientist.com/home',
-      'https://rss.nytimes.com/services/xml/rss/nyt/Science.xml',
-      'https://www.scientificamerican.com/platform/syndication/rss/',
-    ],
-    energy: [
-      'https://www.energy.gov/rss.xml',
-      'https://www.greentechmedia.com/feeds/news',
-      'https://oilprice.com/rss/main',
-    ],
-    agriculture: [
-      'https://www.agweb.com/rss',
-      'https://www.farmprogress.com/rss',
+    religion: [
+      'https://religionnews.com/feed/',
+      'https://www.christianitytoday.com/rss/',
     ],
   },
 
   GB: {
     law: [
-      'https://www.theguardian.com/law/rss',
-      'https://www.lawgazette.co.uk/rss',
-      'https://legalfutures.co.uk/feed',
-      'https://ukscblog.com/feed/',
-      'https://www.legal500.com/rss/',
+      'https://lawgazette.co.uk/17.rss',
+      'https://legalcheek.com/feed/',
     ],
     finance: [
-      'https://www.ft.com/?format=rss',
-      'https://www.theguardian.com/money/rss',
-      'https://www.thisismoney.co.uk/money/rss/index.html',
-      'https://moneyweek.com/feed/',
+      'https://feeds.bbci.co.uk/news/business/rss.xml',
+      'https://www.theguardian.com/business/economics/rss',
     ],
     technology: [
       'https://feeds.bbci.co.uk/news/technology/rss.xml',
-      'https://www.theregister.com/headlines.atom',
-      'https://www.wired.co.uk/rss',
-      'https://techmonitor.ai/feed',
+      'https://www.theguardian.com/technology/rss',
     ],
     health: [
       'https://feeds.bbci.co.uk/news/health/rss.xml',
       'https://www.theguardian.com/society/health/rss',
-      'https://www.pulsetoday.co.uk/feed/',
-      'https://www.nursingtimes.net/feed/',
     ],
     education: [
+      'https://feeds.bbci.co.uk/news/education/rss.xml',
       'https://www.theguardian.com/education/rss',
-      'https://www.tes.com/rss',
-      'https://wonkhe.com/feed/',
     ],
     politics: [
-      'https://www.theguardian.com/politics/rss',
-      'https://feeds.skynews.com/feeds/rss/politics.xml',
       'https://feeds.bbci.co.uk/news/politics/rss.xml',
-      'https://order-order.com/feed/',
+      'https://www.theguardian.com/politics/rss',
     ],
     business: [
-      'https://feeds.bbci.co.uk/news/business/rss.xml',
       'https://www.theguardian.com/business/rss',
-      'https://www.cityam.com/feed/',
+      'https://www.telegraph.co.uk/business/rss.xml',
     ],
     sports: [
-      'https://www.theguardian.com/sport/rss',
-      'https://feeds.skynews.com/feeds/rss/sports.xml',
       'https://feeds.bbci.co.uk/sport/rss.xml',
+      'https://www.theguardian.com/uk/sport/rss',
     ],
     entertainment: [
       'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
-      'https://www.theguardian.com/culture/rss',
-      'https://www.standard.co.uk/culture/rss',
+      'https://www.dailymail.co.uk/tvshowbiz/index.rss',
     ],
     realestate: [
       'https://www.theguardian.com/money/property/rss',
-      'https://www.propertyweek.com/rss',
-      'https://www.thisismoney.co.uk/money/mortgageshome/rss/index.html',
+      'https://www.telegraph.co.uk/property/rss.xml',
     ],
-    science: [
-      'https://www.theguardian.com/science/rss',
-      'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
+    agriculture: [
+      'https://www.fwi.co.uk/feed',
     ],
     energy: [
-      'https://www.theguardian.com/environment/energy/rss',
-      'https://www.rechargenews.com/rss',
+      'https://www.energyvoice.com/feed/',
+      'https://www.current-news.co.uk/feed/',
+    ],
+    travel: [
+      'https://www.theguardian.com/uk/travel/rss',
+      'https://www.telegraph.co.uk/travel/rss.xml',
+    ],
+    religion: [
+      'https://www.churchtimes.co.uk/rss',
     ],
   },
 
   AU: {
     law: [
-      'https://www.lawyersweekly.com.au/rss',
-      'https://www.thelawyer.com/rss',
-      'https://www.abc.net.au/news/topic/law/feed',
+      'https://www.lawyersweekly.com.au/feed/',
+      'https://www.smh.com.au/rss/national/nsw/courts-and-law.xml',
     ],
     finance: [
-      'https://www.afr.com/rss',
-      'https://www.smh.com.au/business/rss',
-      'https://www.abc.net.au/news/business/feed',
+      'https://www.abc.net.au/news/feed/51892/rss.xml',
+      'https://www.smh.com.au/rss/business.xml',
     ],
     technology: [
-      'https://www.itnews.com.au/rss/',
-      'https://www.zdnet.com/news/rss.xml',
-      'https://www.abc.net.au/news/science-environment/feed',
+      'https://www.itnews.com.au/RSS/rss.ashx',
+      'https://www.smh.com.au/rss/technology.xml',
     ],
     health: [
-      'https://www.abc.net.au/news/health/feed',
-      'https://www.smh.com.au/healthcare/rss',
-      'https://www.healthcareit.com.au/rss/',
+      'https://www.abc.net.au/news/feed/51120/rss.xml?category=health',
     ],
     education: [
-      'https://www.abc.net.au/news/education/feed',
-      'https://www.smh.com.au/education/rss',
+      'https://educationhq.com/feed/',
     ],
     politics: [
-      'https://www.abc.net.au/news/politics/feed',
-      'https://www.smh.com.au/politics/rss',
-      'https://www.theaustralian.com.au/national-affairs/rss',
+      'https://www.abc.net.au/news/feed/52342/rss.xml',
+      'https://www.smh.com.au/rss/politics/federal.xml',
     ],
     business: [
-      'https://www.afr.com/rss',
-      'https://www.smh.com.au/business/rss',
+      'https://www.smh.com.au/rss/business.xml',
+      'https://www.michaelwest.com.au/feed/',
     ],
     sports: [
-      'https://www.abc.net.au/news/sport/feed',
-      'https://www.smh.com.au/sport/rss',
-      'https://www.foxsports.com.au/rss',
+      'https://www.abc.net.au/news/feed/45924/rss.xml',
+      'https://www.foxsports.com.au/content-feeds/rss/',
     ],
     entertainment: [
-      'https://www.smh.com.au/entertainment/rss',
-      'https://www.abc.net.au/news/entertainment/feed',
+      'https://www.abc.net.au/news/feed/51854/rss.xml',
+      'https://www.smh.com.au/rss/culture.xml',
     ],
     realestate: [
-      'https://www.smh.com.au/property/rss',
-      'https://www.domain.com.au/news/feed/',
+      'https://www.smh.com.au/rss/property.xml',
+    ],
+    agriculture: [
+      'https://www.abc.net.au/news/feed/51120/rss.xml?category=rural',
+    ],
+    energy: [
+      'https://reneweconomy.com.au/feed/',
+    ],
+    travel: [
+      'https://www.smh.com.au/rss/traveller.xml',
+    ],
+    religion: [
+      'https://www.eternitynews.com.au/feed/',
     ],
   },
 
   CA: {
     law: [
       'https://www.canadianlawyermag.com/rss',
-      'https://www.lexology.com/rss/jurisdiction-canada',
-      'https://ablawg.ca/feed/',
+      'https://www.lawtimesnews.com/rss',
+      'https://www.slaw.ca/feed/',
     ],
     finance: [
-      'https://www.theglobeandmail.com/rss/business/',
-      'https://financialpost.com/feed/',
-      'https://www.bnnbloomberg.ca/rss',
+      'https://business.financialpost.com/feed/',
+      'https://www.theglobeandmail.com/investing/?service=rss',
     ],
     technology: [
-      'https://www.itworldcanada.com/rss',
       'https://betakit.com/feed/',
-      'https://www.thelogic.co/feed/',
+      'https://globalnews.ca/tech/feed/',
     ],
     health: [
-      'https://rss.cbc.ca/lineup/health.xml',
-      'https://www.theglobeandmail.com/rss/health/',
+      'https://www.cbc.ca/cmlink/rss-health',
+      'https://globalnews.ca/health/feed/',
     ],
     education: [
-      'https://rss.cbc.ca/lineup/technology.xml',
       'https://www.universityaffairs.ca/feed/',
+      'https://globalnews.ca/education/feed/',
     ],
     politics: [
-      'https://rss.cbc.ca/lineup/politics.xml',
-      'https://www.theglobeandmail.com/rss/politics/',
-      'https://ipolitics.ca/feed/',
+      'https://www.cbc.ca/cmlink/rss-politics',
+      'https://globalnews.ca/politics/feed/',
     ],
     business: [
-      'https://www.theglobeandmail.com/rss/business/',
-      'https://financialpost.com/feed/',
+      'https://www.cbc.ca/cmlink/rss-business',
+      'https://www.canadianbusiness.com/feed/',
     ],
     sports: [
-      'https://rss.cbc.ca/lineup/sports.xml',
-      'https://www.tsn.ca/rss',
+      'https://www.cbc.ca/cmlink/rss-sports',
+      'https://www.tsn.ca/rss/sports.xml',
     ],
     entertainment: [
-      'https://rss.cbc.ca/lineup/arts.xml',
-      'https://www.theglobeandmail.com/rss/arts/',
+      'https://www.cbc.ca/cmlink/rss-arts',
+      'https://globalnews.ca/entertainment/feed/',
     ],
     realestate: [
-      'https://www.theglobeandmail.com/rss/real-estate/',
-      'https://financialpost.com/real-estate/feed/',
+      'https://globalnews.ca/real-estate/feed/',
+    ],
+    agriculture: [
+      'https://www.realagriculture.com/feed/',
+    ],
+    energy: [
+      'https://globalnews.ca/environment/feed/',
+    ],
+    travel: [
+      'https://globalnews.ca/travel/feed/',
+    ],
+    religion: [
+      'https://canadiancatholicnews.ca/feed/',
     ],
   },
 
   ZA: {
     law: [
-      'https://www.dailymaverick.co.za/feed/',
-      'https://groundup.org.za/feed/',
-      'https://www.legalbrief.co.za/rss/',
+      'https://www.derebus.org.za/feed/',
+      'https://www.derebus.org.za/category/columns/feed/',
     ],
     finance: [
       'https://www.moneyweb.co.za/feed/',
-      'https://www.businesslive.co.za/rss/',
-      'https://www.fin24.com/rss',
+      'https://businesstech.co.za/news/feed/',
     ],
     technology: [
-      'https://mybroadband.co.za/feed/',
       'https://techcentral.co.za/feed/',
-      'https://www.itweb.co.za/rss/',
+      'https://mybroadband.co.za/news/feed',
     ],
     health: [
-      'https://health-e.org.za/feed/',
-      'https://groundup.org.za/feed/',
+      'https://www.news24.com/health24/rss',
     ],
     education: [
-      'https://www.dailymaverick.co.za/feed/',
-      'https://groundup.org.za/feed/',
+      'https://www.dailymaverick.co.za/section/education/feed/',
     ],
     politics: [
-      'https://www.dailymaverick.co.za/feed/',
+      'https://www.dailymaverick.co.za/dmrss/',
       'https://ewn.co.za/RSS%20Feeds/Latest%20News',
-      'https://www.news24.com/rss',
     ],
     business: [
-      'https://www.moneyweb.co.za/feed/',
-      'https://www.businesslive.co.za/rss/',
+      'https://www.businessinsider.co.za/rss',
+      'https://citizen.co.za/category/business/feed/',
     ],
     sports: [
-      'https://www.sport24.co.za/rss',
-      'https://www.supersport.com/rss',
+      'https://www.timeslive.co.za/rss/?section=sport',
+      'https://sacricketmag.com/feed/',
     ],
     entertainment: [
-      'https://www.timeslive.co.za/rss/',
-      'https://www.sowetanlive.co.za/rss/',
+      'https://www.timeslive.co.za/rss/?section=entertainment',
+    ],
+    realestate: [
+      'https://www.property24.com/articles/rss',
+    ],
+    agriculture: [
+      'https://www.farmersweekly.co.za/feed/',
+    ],
+    energy: [
+      'https://businesstech.co.za/news/category/energy/feed/',
+    ],
+    travel: [
+      'https://www.getaway.co.za/feed/',
+    ],
+    religion: [
+      'https://gatewaynews.co.za/feed/',
     ],
   },
 
   IN: {
     law: [
-      'https://www.livelaw.in/rss/',
-      'https://barandbench.com/feed/',
-      'https://www.scobserver.in/feed/',
-      'https://lawbriefs.in/feed/',
-      'https://www.verdictum.in/feed/',
+      'https://www.livelaw.in/feed/',
+      'https://www.barandbench.com/feed/',
     ],
     finance: [
+      'https://www.livemint.com/rss/news',
       'https://economictimes.indiatimes.com/rssfeedsdefault.cms',
-      'https://www.moneycontrol.com/rss/latestnews.xml',
-      'https://www.livemint.com/rss/feed',
-      'https://www.businesstoday.in/rss/home',
     ],
     technology: [
       'https://inc42.com/feed/',
-      'https://entrackr.com/feed/',
-      'https://www.medianama.com/feed/',
-      'https://yourstory.com/feed',
+      'https://www.digit.in/feed/',
     ],
     health: [
-      'https://www.thehealthsite.com/feed/',
       'https://health.economictimes.indiatimes.com/rss/topstories',
-      'https://www.healthcareradiindia.com/feed/',
     ],
     education: [
-      'https://www.thehindu.com/education/feeder/default.rss',
-      'https://indianexpress.com/section/education/feed/',
-      'https://economictimes.indiatimes.com/industry/services/education/rssfeeds/13357270.cms',
+      'https://education.indianexpress.com/feed/',
     ],
     politics: [
-      'https://feeds.feedburner.com/ndtvnews-top-stories',
-      'https://theprint.in/feed/',
-      'https://scroll.in/feed',
+      'https://swarajyamag.com/topic/rss',
       'https://www.thehindu.com/news/national/feeder/default.rss',
     ],
     business: [
-      'https://economictimes.indiatimes.com/rssfeedsdefault.cms',
-      'https://www.livemint.com/rss/feed',
-      'https://www.businesstoday.in/rss/home',
+      'https://www.business-standard.com/rss/home_page_top_stories.rss',
+      'https://swarajyamag.com/section/economy/feed',
     ],
     sports: [
+      'https://sports.ndtv.com/rss/sports',
       'https://www.espncricinfo.com/rss/content/story/feeds/0.xml',
-      'https://sports.ndtv.com/rss/all',
-      'https://indianexpress.com/section/sports/feed/',
     ],
     entertainment: [
+      'https://www.bollywoodhungama.com/rss/news.xml',
       'https://indianexpress.com/section/entertainment/feed/',
-      'https://www.bollywoodhungama.com/rss/',
-      'https://www.filmfare.com/rss/',
     ],
     realestate: [
-      'https://economictimes.indiatimes.com/industry/services/property-/-cstruction/rssfeeds/13357464.cms',
-      'https://www.99acres.com/blog/feed',
+      'https://realty.economictimes.indiatimes.com/rss/topstories',
     ],
     agriculture: [
-      'https://www.thehindu.com/sci-tech/agriculture/feeder/default.rss',
       'https://krishijagran.com/feed/',
+      'https://krishijagran.com/farm-mechanization/feed/',
+    ],
+    energy: [
+      'https://mercomindia.com/feed/',
+      'https://energy.economictimes.indiatimes.com/rss/topstories',
+    ],
+    travel: [
+      'https://www.outlookindia.com/outlooktraveller/rss/',
+    ],
+    religion: [
+      'https://swarajyamag.com/category/culture/feed',
     ],
   },
 };
 
-// ─── Generic topic feeds (international, used when country-specific unavailable) ─
+// ─── Generic topic feeds (international fallback) ─────────────────────────────
 export const TOPIC_REGISTRY: Record<string, string[]> = {
   law: [
+    'https://rss.nytimes.com/services/xml/rss/nyt/Law.xml',
     'https://www.theguardian.com/law/rss',
-    'https://www.lawfaremedia.org/rss.xml',
-    'https://abovethelaw.com/feed/',
+    'https://legalreader.com/feed/',
   ],
   finance: [
+    'https://feeds.reuters.com/reuters/businessNews',
     'https://feeds.bbci.co.uk/news/business/rss.xml',
-    'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
-    'https://www.ft.com/?format=rss',
+    'https://www.ft.com/rss/home/uk',
   ],
   technology: [
-    'https://feeds.bbci.co.uk/news/technology/rss.xml',
-    'https://techcrunch.com/feed/',
     'https://www.theverge.com/rss/index.xml',
+    'https://feeds.arstechnica.com/arstechnica/index',
+    'https://feeds.feedburner.com/TechCrunch',
   ],
   health: [
     'https://feeds.bbci.co.uk/news/health/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Health.xml',
-    'https://www.theguardian.com/society/rss',
+    'https://www.who.int/rss-feeds/news-english.xml',
   ],
   education: [
     'https://feeds.bbci.co.uk/news/education/rss.xml',
     'https://www.theguardian.com/education/rss',
-    'https://rss.nytimes.com/services/xml/rss/nyt/Education.xml',
+    'https://www.timeshighereducation.com/news/rss',
   ],
   politics: [
+    'https://www.aljazeera.com/xml/rss/all.xml',
+    'https://feeds.bbci.co.uk/news/world/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml',
-    'https://www.theguardian.com/politics/rss',
   ],
   business: [
+    'https://www.wsj.com/xml/rss/3_7014.xml',
     'https://feeds.bbci.co.uk/news/business/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
   ],
   sports: [
-    'https://feeds.bbci.co.uk/sport/rss.xml',
-    'https://www.theguardian.com/sport/rss',
     'https://www.espn.com/espn/rss/news',
+    'https://www.skysports.com/rss/12040',
+    'https://feeds.bbci.co.uk/sport/rss.xml',
   ],
   entertainment: [
-    'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
+    'https://www.hollywoodreporter.com/feed/',
     'https://variety.com/feed/',
+    'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml',
   ],
   realestate: [
-    'https://www.theguardian.com/money/property/rss',
+    'https://www.worldpropertyjournal.com/rss.xml',
     'https://rss.nytimes.com/services/xml/rss/nyt/RealEstate.xml',
+    'https://www.theguardian.com/money/property/rss',
   ],
   science: [
     'https://feeds.newscientist.com/home',
@@ -615,27 +595,31 @@ export const TOPIC_REGISTRY: Record<string, string[]> = {
   ],
   travel: [
     'https://rss.nytimes.com/services/xml/rss/nyt/Travel.xml',
-    'https://www.theguardian.com/travel/rss',
+    'https://www.lonelyplanet.com/news/feed/atom/',
+    'https://www.nationalgeographic.com/travel/rss/',
   ],
   food: [
     'https://feeds.feedburner.com/seriouseats/recipes',
     'https://rss.nytimes.com/services/xml/rss/nyt/DiningandWine.xml',
   ],
   energy: [
-    'https://oilprice.com/rss/main',
+    'https://www.oilandgasjournal.com/rss',
     'https://www.theguardian.com/environment/energy/rss',
+    'https://oilprice.com/rss/main',
   ],
   agriculture: [
+    'https://www.fao.org/news/rss-feed/en/',
     'https://www.theguardian.com/environment/food/rss',
-    'https://www.agweb.com/rss',
+    'https://www.agweb.com/rss/news',
   ],
   religion: [
-    'https://www.theguardian.com/world/religion/rss',
+    'https://www.vaticannews.va/en.rss.xml',
     'https://religionnews.com/feed/',
+    'https://www.theguardian.com/world/religion/rss',
   ],
 };
 
-// ─── Google News section feeds (topic-level, not country-scoped) ──────────────
+// ─── Google News section feeds ────────────────────────────────────────────────
 export const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   education:     'https://news.google.com/rss/headlines/section/topic/EDUCATION?hl=en&gl=US&ceid=US:en',
   politics:      'https://news.google.com/rss/headlines/section/topic/NATION?hl=en&gl=US&ceid=US:en',
@@ -648,60 +632,43 @@ export const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   science:       'https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en&gl=US&ceid=US:en',
 };
 
-// ─── Topic aliases — maps any user niche/keyword to a canonical topic key ─────
-// Add new aliases here when users configure unusual niche names.
+// ─── Topic aliases ────────────────────────────────────────────────────────────
 export const TOPIC_ALIASES: Record<string, string> = {
-  // law
   'law': 'law', 'legal': 'law', 'court': 'law', 'crime': 'law', 'justice': 'law',
   'attorney': 'law', 'lawyer': 'law', 'litigation': 'law', 'judiciary': 'law',
-  // finance
   'finance': 'finance', 'financial': 'finance', 'money': 'finance', 'economy': 'finance',
   'investment': 'finance', 'crypto': 'finance', 'banking': 'finance', 'forex': 'finance',
   'fintech': 'finance', 'stocks': 'finance', 'trading': 'finance', 'insurance': 'finance',
-  // technology
   'technology': 'technology', 'tech': 'technology', 'software': 'technology',
   'ai': 'technology', 'startup': 'technology', 'cybersecurity': 'technology',
   'gadgets': 'technology', 'programming': 'technology',
-  // health
   'health': 'health', 'medical': 'health', 'wellness': 'health', 'fitness': 'health',
   'medicine': 'health', 'hospital': 'health', 'pharma': 'health', 'nutrition': 'health',
   'mental health': 'health', 'healthcare': 'health',
-  // education
   'education': 'education', 'school': 'education', 'academic': 'education',
   'learning': 'education', 'exam': 'education', 'university': 'education',
   'student': 'education', 'curriculum': 'education', 'teacher': 'education',
-  // politics
   'politics': 'politics', 'political': 'politics', 'government': 'politics',
   'election': 'politics', 'policy': 'politics', 'parliament': 'politics',
   'senate': 'politics', 'democracy': 'politics',
-  // business
   'business': 'business', 'commerce': 'business', 'entrepreneurship': 'business',
   'marketing': 'business', 'ecommerce': 'business', 'retail': 'business',
   'supply chain': 'business', 'logistics': 'business',
-  // sports
   'sports': 'sports', 'sport': 'sports', 'football': 'sports', 'basketball': 'sports',
   'cricket': 'sports', 'tennis': 'sports', 'athletics': 'sports', 'soccer': 'sports',
-  // entertainment
   'entertainment': 'entertainment', 'music': 'entertainment', 'movies': 'entertainment',
   'film': 'entertainment', 'celebrity': 'entertainment', 'tv': 'entertainment',
   'streaming': 'entertainment', 'gaming': 'entertainment',
-  // real estate
   'realestate': 'realestate', 'real estate': 'realestate', 'property': 'realestate',
   'housing': 'realestate', 'mortgage': 'realestate', 'construction': 'realestate',
-  // science
   'science': 'science', 'research': 'science', 'climate': 'science',
   'environment': 'science', 'space': 'science', 'biology': 'science',
-  // travel
   'travel': 'travel', 'tourism': 'travel', 'hospitality': 'travel', 'aviation': 'travel',
-  // food
   'food': 'food', 'cooking': 'food', 'recipe': 'food', 'restaurant': 'food', 'culinary': 'food',
-  // energy
   'energy': 'energy', 'oil': 'energy', 'gas': 'energy', 'renewable': 'energy',
   'solar': 'energy', 'electricity': 'energy', 'power': 'energy',
-  // agriculture
   'agriculture': 'agriculture', 'farming': 'agriculture', 'agric': 'agriculture',
   'crops': 'agriculture', 'livestock': 'agriculture', 'agribusiness': 'agriculture',
-  // religion
   'religion': 'religion', 'faith': 'religion', 'church': 'religion',
   'islam': 'religion', 'christianity': 'religion', 'mosque': 'religion',
 };

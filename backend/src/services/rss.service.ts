@@ -45,13 +45,21 @@ function detectTopic(relevanceTopics: string[], niches: string[]): string {
   return 'general';
 }
 
+// Human-readable country names for Google News query context
+const COUNTRY_NAMES: Partial<Record<PipelineCountry, string>> = {
+  NG: 'Nigeria', US: 'United States', GB: 'United Kingdom',
+  AU: 'Australia', CA: 'Canada', ZA: 'South Africa', IN: 'India',
+};
+
 function buildGoogleNewsUrl(query: string, gl: string, ceid: string): string {
   return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=${gl}&ceid=${ceid}`;
 }
 
-function buildCombinedQuery(niche: string, relevanceTopics: string[]): string {
-  if (relevanceTopics.length === 0) return niche;
-  return `${niche} ${relevanceTopics[0]}`.trim();
+// Build a clean, country-scoped query for Google News.
+// Avoids garbage like "Law Law & Courts" by using "<Country> <niche>" instead.
+function buildCountryQuery(niche: string, country: PipelineCountry): string {
+  const countryName = COUNTRY_NAMES[country];
+  return countryName ? `${countryName} ${niche}` : niche;
 }
 
 function isGoogleNewsUrl(url: string): boolean { return url.includes('news.google.com'); }
@@ -222,7 +230,6 @@ export class RSSService {
     country: PipelineCountry,
     topic: string,
     niches: string[],
-    relevanceTopics: string[],
     windowHours: number,
     limit: number,
     existingKeys: Set<string>
@@ -273,10 +280,13 @@ export class RSSService {
       }
     }
 
-    // 2d. Keyword search scoped to country geo
+    // 2d. Country-scoped keyword searches on Google News.
+    // Queries use "<Country> <niche>" (e.g. "Nigeria Law") rather than
+    // naively concatenating the niche with relevanceTopics, which produced
+    // garbage like "Law Law & Courts".
     if (pool.length < limit) {
       logger.info(`RSS: step 2d — keyword searches (gl=${cfg.gl})`);
-      const queries = niches.map(n => buildCombinedQuery(n, relevanceTopics));
+      const queries = niches.map(n => buildCountryQuery(n, country));
       const results = await Promise.allSettled(
         queries.map(q => this._fetchRaw(buildGoogleNewsUrl(q, cfg.gl, cfg.ceid)).then(items => ({ q, items })))
       );
@@ -333,7 +343,7 @@ export class RSSService {
       // Steps 2b–2d: international supplement for remaining slots
       const existingKeys = new Set(primary.map(i => this.toKey(i.title)));
       const international = await this._fetchInternationalSupplement(
-        country, topic, niches, relevanceTopics,
+        country, topic, niches,
         windowHours, totalLimit - primary.length, existingKeys
       );
 
@@ -361,7 +371,7 @@ export class RSSService {
     logger.info(`RSS: step 1 gave ${registry.length}/${totalLimit} — running step 2`);
 
     const international = await this._fetchInternationalSupplement(
-      country, topic, niches, relevanceTopics,
+      country, topic, niches,
       windowHours, totalLimit - registry.length, existingKeys
     );
 
