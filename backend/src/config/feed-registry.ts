@@ -630,6 +630,24 @@ export const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   science:       'https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en&gl=US&ceid=US:en',
 };
 
+// ─── Topic priority feeds ─────────────────────────────────────────────────────
+// Per-topic feeds that should be consulted ahead of generic international
+// fallbacks but after the country-specific feeds. Used for topics where
+// certain foreign jurisdictions are inherently relevant regardless of the
+// pipeline's home country — e.g. law pipelines always benefit from US and UK
+// legal news because those systems heavily influence other common law countries.
+export const TOPIC_PRIORITY_REGISTRY: Partial<Record<string, string[]>> = {
+  law: [
+    // US law
+    'https://legalreader.com/feed/',
+    'https://www.abajournal.com/feeds/rss/',
+    'https://rss.nytimes.com/services/xml/rss/nyt/Law.xml',
+    // UK law
+    'https://lawgazette.co.uk/17.rss',
+    'https://legalcheek.com/feed/',
+  ],
+};
+
 // ─── Topic aliases ────────────────────────────────────────────────────────────
 export const TOPIC_ALIASES: Record<string, string> = {
   'law': 'law', 'legal': 'law', 'court': 'law', 'crime': 'law', 'justice': 'law',

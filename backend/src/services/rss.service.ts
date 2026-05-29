@@ -6,6 +6,7 @@ import {
   COUNTRY_CONFIG,
   COUNTRY_TOPIC_REGISTRY,
   TOPIC_REGISTRY,
+  TOPIC_PRIORITY_REGISTRY,
   GOOGLE_TOPIC_FEEDS,
   TOPIC_ALIASES,
   type PipelineCountry,
@@ -294,10 +295,25 @@ export class RSSService {
         .map(raw => ({ raw, source: 'Google News' })));
     }
 
+    // ── 2e. Topic priority feeds (e.g. US + UK law) ───────────────────────
+    // Runs after country keyword searches but before generic fallbacks.
+    // Priority feeds are defined per-topic in TOPIC_PRIORITY_REGISTRY and
+    // represent jurisdictions broadly relevant regardless of pipeline country.
+    if (pool.length < limit) {
+      const countryTopicFeeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
+      const priorityFeeds = (TOPIC_PRIORITY_REGISTRY[topic] || []).filter(
+        u => !countryTopicFeeds.includes(u)
+      );
+      await fetchFeeds(priorityFeeds, `step 2e priority feeds "${topic}"`);
+    }
+
     // ── 2b. Generic international topic feeds ─────────────────────────────
     if (pool.length < limit) {
       const countryTopicFeeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
-      const genericFeeds = (TOPIC_REGISTRY[topic] || []).filter(u => !countryTopicFeeds.includes(u));
+      const priorityFeeds = TOPIC_PRIORITY_REGISTRY[topic] || [];
+      const genericFeeds = (TOPIC_REGISTRY[topic] || []).filter(
+        u => !countryTopicFeeds.includes(u) && !priorityFeeds.includes(u)
+      );
       await fetchFeeds(genericFeeds, `step 2b generic topic "${topic}"`);
     }
 
