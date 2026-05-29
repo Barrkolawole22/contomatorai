@@ -112,8 +112,6 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://barristerng.com/feed/',
       'https://www.courtroommail.com/feed/',
       'https://dnllegalandstyle.com/feed/',
-      'https://lawyard.ng/feed/',
-      'https://www.premiumtimesng.com/category/news/law/feed/',
     ],
     finance: [
       'https://nairametrics.com/feed/',
@@ -139,7 +137,7 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://rss.punchng.com/v1/category/education',
       'https://www.vanguardngr.com/category/education/feed/',
       'https://dailypost.ng/education/feed/',
-      'https://guardian.ng/category/features/education/feed/',
+      // removed: https://guardian.ng/category/features/education/feed/ — 403
     ],
     politics: [
       'https://rss.punchng.com/v1/category/politics',
@@ -561,7 +559,7 @@ export const TOPIC_REGISTRY: Record<string, string[]> = {
   education: [
     'https://feeds.bbci.co.uk/news/education/rss.xml',
     'https://www.theguardian.com/education/rss',
-    'https://www.timeshighereducation.com/news/rss',
+    // removed: https://www.timeshighereducation.com/news/rss — 404
   ],
   politics: [
     'https://www.aljazeera.com/xml/rss/all.xml',

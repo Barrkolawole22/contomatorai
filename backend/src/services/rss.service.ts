@@ -55,11 +55,14 @@ function buildGoogleNewsUrl(query: string, gl: string, ceid: string): string {
   return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=${gl}&ceid=${ceid}`;
 }
 
-// Build a clean, country-scoped query for Google News.
-// Avoids garbage like "Law Law & Courts" by using "<Country> <niche>" instead.
-function buildCountryQuery(niche: string, country: PipelineCountry): string {
+// Build a single OR-combined Google News query for all niches, scoped to country.
+// e.g. niches=["WAEC","NECO","JAMB"] → "Nigeria WAEC OR Nigeria NECO OR Nigeria JAMB"
+// This collapses N per-niche requests into one, dramatically reducing HTTP calls.
+function buildCombinedCountryQuery(niches: string[], country: PipelineCountry): string {
   const countryName = COUNTRY_NAMES[country];
-  return countryName ? `${countryName} ${niche}` : niche;
+  return niches
+    .map(n => (countryName ? `${countryName} ${n}` : n))
+    .join(' OR ');
 }
 
 function isGoogleNewsUrl(url: string): boolean { return url.includes('news.google.com'); }
@@ -148,6 +151,31 @@ export class RSSService {
     return title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 60);
   }
 
+  // Shape a batch of raw items in parallel, deduplicating against seen keys.
+  // Takes slightly more candidates than needed (limit + buffer) to absorb
+  // items that resolve to null or collide on dedup.
+  private async _shapeBatch(
+    raws: Array<{ raw: any; source: string }>,
+    seen: Set<string>,
+    limit: number
+  ): Promise<RSSItem[]> {
+    // Take a small buffer over the limit so dupes/nulls don't leave us short
+    const candidates = raws.slice(0, limit + 10);
+    const settled = await Promise.allSettled(
+      candidates.map(({ raw, source }) => this._shape(raw, source))
+    );
+    const results: RSSItem[] = [];
+    for (const r of settled) {
+      if (r.status !== 'fulfilled' || !r.value) continue;
+      const key = this.toKey(r.value.title);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(r.value);
+      if (results.length >= limit) break;
+    }
+    return results;
+  }
+
   // Step 1: broad country registry — only used when no specific topic is detected
   private async _fetchCountryRegistry(
     country: PipelineCountry,
@@ -169,15 +197,10 @@ export class RSSService {
       if (result.status === 'rejected') continue;
       const { url, items } = result.value;
       const hostname = new URL(url).hostname;
-      for (const raw of items) {
-        if (!isWithinWindow(raw.pubDate || '', windowHours)) continue;
-        const key = this.toKey(raw.title || '');
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const shaped = await this._shape(raw, hostname);
-        if (shaped) pool.push(shaped);
-        if (pool.length >= limit) break;
-      }
+      const windowed = items.filter(r => isWithinWindow(r.pubDate || '', windowHours));
+      const raws = windowed.map(raw => ({ raw, source: hostname }));
+      const shaped = await this._shapeBatch(raws, seen, limit - pool.length);
+      pool.push(...shaped);
       if (pool.length >= limit) break;
     }
 
@@ -198,8 +221,8 @@ export class RSSService {
 
     logger.info(`RSS: step 2a country-topic "${country}/${topic}" — ${feeds.length} feeds (${windowHours}h window)`);
 
-    const pool: RSSItem[] = [];
     const seen = new Set(existingKeys);
+    const pool: RSSItem[] = [];
 
     const results = await Promise.allSettled(
       feeds.map(url => this._fetchRaw(url).then(items => ({ url, items })))
@@ -209,15 +232,10 @@ export class RSSService {
       if (result.status === 'rejected') continue;
       const { url, items } = result.value;
       const hostname = new URL(url).hostname;
-      for (const raw of items) {
-        if (!isWithinWindow(raw.pubDate || '', windowHours)) continue;
-        const key = this.toKey(raw.title || '');
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const shaped = await this._shape(raw, hostname);
-        if (shaped) pool.push(shaped);
-        if (pool.length >= limit) break;
-      }
+      const windowed = items.filter(r => isWithinWindow(r.pubDate || '', windowHours));
+      const raws = windowed.map(raw => ({ raw, source: hostname }));
+      const shaped = await this._shapeBatch(raws, seen, limit - pool.length);
+      pool.push(...shaped);
       if (pool.length >= limit) break;
     }
 
@@ -225,7 +243,9 @@ export class RSSService {
     return pool;
   }
 
-  // Steps 2b–2d: international topic feeds, Google News section, keyword search
+  // Steps 2d → 2b → 2c (order matters — country-scoped keyword searches run first
+  // so specific niches like WAEC/NECO/CBN/NNPC fill the pool before generic
+  // international feeds get a chance to swamp it with irrelevant content)
   private async _fetchInternationalSupplement(
     country: PipelineCountry,
     topic: string,
@@ -238,15 +258,10 @@ export class RSSService {
     const pool: RSSItem[] = [];
     const seen = new Set(existingKeys);
 
-    const addItem = async (raw: any, source: string): Promise<boolean> => {
-      if (!raw.title || !raw.link) return false;
-      if (!isWithinWindow(raw.pubDate || '', windowHours)) return false;
-      const key = this.toKey(raw.title || '');
-      if (seen.has(key)) return false;
-      seen.add(key);
-      const shaped = await this._shape(raw, source);
-      if (shaped) { pool.push(shaped); return true; }
-      return false;
+    const absorb = async (raws: Array<{ raw: any; source: string }>) => {
+      if (pool.length >= limit) return;
+      const shaped = await this._shapeBatch(raws, seen, limit - pool.length);
+      pool.push(...shaped);
     };
 
     const fetchFeeds = async (urls: string[], label: string) => {
@@ -257,47 +272,42 @@ export class RSSService {
       );
       for (const result of results) {
         if (result.status === 'rejected') continue;
-        for (const raw of result.value.items) {
-          await addItem(raw, new URL(result.value.url).hostname);
-          if (pool.length >= limit) return;
-        }
+        const { url, items } = result.value;
+        const hostname = new URL(url).hostname;
+        const windowed = items.filter(r => isWithinWindow(r.pubDate || '', windowHours));
+        await absorb(windowed.map(raw => ({ raw, source: hostname })));
+        if (pool.length >= limit) return;
       }
     };
 
-    // 2b. Generic international topic feeds
-    const countryTopicFeeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
-    const genericFeeds = (TOPIC_REGISTRY[topic] || []).filter(u => !countryTopicFeeds.includes(u));
-    await fetchFeeds(genericFeeds, `step 2b generic topic "${topic}"`);
+    // ── 2d. Country-scoped keyword searches (FIRST) ────────────────────────
+    // All niches are combined into a single OR query per country to minimise
+    // HTTP requests: ["WAEC","NECO","JAMB"] → one request for
+    // "Nigeria WAEC OR Nigeria NECO OR Nigeria JAMB" instead of three.
+    if (pool.length < limit && niches.length) {
+      const combinedQuery = buildCombinedCountryQuery(niches, country);
+      const searchUrl = buildGoogleNewsUrl(combinedQuery, cfg.gl, cfg.ceid);
+      logger.info(`RSS: step 2d — combined keyword search (gl=${cfg.gl}): "${combinedQuery}"`);
+      const items = await this._fetchRaw(searchUrl);
+      logger.info(`RSS: step 2d → ${items.length} raw`);
+      await absorb(items.filter(r => isWithinWindow(r.pubDate || '', windowHours))
+        .map(raw => ({ raw, source: 'Google News' })));
+    }
 
-    // 2c. Google News topic section feed
+    // ── 2b. Generic international topic feeds ─────────────────────────────
+    if (pool.length < limit) {
+      const countryTopicFeeds = COUNTRY_TOPIC_REGISTRY[country]?.[topic] || [];
+      const genericFeeds = (TOPIC_REGISTRY[topic] || []).filter(u => !countryTopicFeeds.includes(u));
+      await fetchFeeds(genericFeeds, `step 2b generic topic "${topic}"`);
+    }
+
+    // ── 2c. Google News topic section feed (US-biased, last resort) ────────
     const topicFeedUrl = GOOGLE_TOPIC_FEEDS[topic];
     if (topicFeedUrl && pool.length < limit) {
       logger.info(`RSS: step 2c — Google News section feed "${topic}"`);
       const items = await this._fetchRaw(topicFeedUrl);
-      for (const raw of items) {
-        await addItem(raw, 'Google News');
-        if (pool.length >= limit) break;
-      }
-    }
-
-    // 2d. Country-scoped keyword searches on Google News.
-    // Queries use "<Country> <niche>" (e.g. "Nigeria Law") rather than
-    // naively concatenating the niche with relevanceTopics, which produced
-    // garbage like "Law Law & Courts".
-    if (pool.length < limit) {
-      logger.info(`RSS: step 2d — keyword searches (gl=${cfg.gl})`);
-      const queries = niches.map(n => buildCountryQuery(n, country));
-      const results = await Promise.allSettled(
-        queries.map(q => this._fetchRaw(buildGoogleNewsUrl(q, cfg.gl, cfg.ceid)).then(items => ({ q, items })))
-      );
-      for (const result of results) {
-        if (result.status === 'rejected') continue;
-        logger.info(`RSS: step 2d query "${result.value.q}" → ${result.value.items.length} raw`);
-        for (const raw of result.value.items) {
-          await addItem(raw, 'Google News');
-          if (pool.length >= limit) return pool;
-        }
-      }
+      await absorb(items.filter(r => isWithinWindow(r.pubDate || '', windowHours))
+        .map(raw => ({ raw, source: 'Google News' })));
     }
 
     return pool;
@@ -340,7 +350,7 @@ export class RSSService {
           .slice(0, totalLimit);
       }
 
-      // Steps 2b–2d: international supplement for remaining slots
+      // Steps 2d → 2b → 2c: supplement for remaining slots
       const existingKeys = new Set(primary.map(i => this.toKey(i.title)));
       const international = await this._fetchInternationalSupplement(
         country, topic, niches,
