@@ -137,7 +137,16 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://rss.punchng.com/v1/category/education',
       'https://www.vanguardngr.com/category/education/feed/',
       'https://dailypost.ng/education/feed/',
-      // removed: https://guardian.ng/category/features/education/feed/ — 403
+    ],
+    scholarship: [
+      // Nigerian-specific scholarship/opportunity news
+      'https://rss.punchng.com/v1/category/education',
+      'https://www.vanguardngr.com/category/education/feed/',
+      'https://dailypost.ng/education/feed/',
+      // International aggregators with strong Nigeria/Africa coverage
+      'https://afterschoolafrica.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
+      'https://www.scholars4dev.com/feed/',
     ],
     politics: [
       'https://rss.punchng.com/v1/category/politics',
@@ -222,6 +231,13 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://www.edweek.org/feed/',
       'https://rss.nytimes.com/services/xml/rss/nyt/Education.xml',
     ],
+    scholarship: [
+      'https://www.edweek.org/feed/',
+      'https://rss.nytimes.com/services/xml/rss/nyt/Education.xml',
+      'https://blog.scholarships.com/feed/',
+      'https://www.fastweb.com/college-scholarships/articles.rss',
+      'https://www.scholars4dev.com/feed/',
+    ],
     politics: [
       'https://rss.politico.com/politics-news.xml',
       'https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml',
@@ -285,6 +301,16 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://feeds.bbci.co.uk/news/education/rss.xml',
       'https://www.theguardian.com/education/rss',
     ],
+    scholarship: [
+      // UK-specific scholarship sources
+      'https://www.theguardian.com/education/scholarships/rss',
+      'https://www.theguardian.com/education/rss',
+      'https://feeds.bbci.co.uk/news/education/rss.xml',
+      'https://www.prospects.ac.uk/rss',
+      // Global aggregators with strong UK coverage (Chevening, Rhodes, etc.)
+      'https://www.scholars4dev.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
+    ],
     politics: [
       'https://feeds.bbci.co.uk/news/politics/rss.xml',
       'https://www.theguardian.com/politics/rss',
@@ -339,6 +365,15 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
     ],
     education: [
       'https://educationhq.com/feed/',
+    ],
+    scholarship: [
+      // Australian scholarship sources (Australia Awards, universities)
+      'https://educationhq.com/feed/',
+      'https://www.abc.net.au/news/feed/51120/rss.xml',
+      'https://www.smh.com.au/rss/feed.xml',
+      // Global aggregators that cover Australia Awards and AusAID-type programs
+      'https://www.scholars4dev.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
     ],
     politics: [
       'https://www.abc.net.au/news/feed/52342/rss.xml',
@@ -395,6 +430,15 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
       'https://www.universityaffairs.ca/feed/',
       'https://globalnews.ca/education/feed/',
     ],
+    scholarship: [
+      // Canadian scholarship sources (Vanier, NSERC, tri-council)
+      'https://www.universityaffairs.ca/feed/',
+      'https://globalnews.ca/education/feed/',
+      'https://www.cbc.ca/cmlink/rss-canada',
+      // Global aggregators with Canadian program coverage
+      'https://www.scholars4dev.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
+    ],
     politics: [
       'https://www.cbc.ca/cmlink/rss-politics',
       'https://globalnews.ca/politics/feed/',
@@ -447,6 +491,12 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
     education: [
       'https://www.dailymaverick.co.za/section/education/feed/',
     ],
+    scholarship: [
+      'https://www.dailymaverick.co.za/section/education/feed/',
+      'https://afterschoolafrica.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
+      'https://www.scholars4dev.com/feed/',
+    ],
     politics: [
       'https://www.dailymaverick.co.za/dmrss/',
       'https://ewn.co.za/RSS%20Feeds/Latest%20News',
@@ -497,6 +547,11 @@ export const COUNTRY_TOPIC_REGISTRY: Partial<Record<PipelineCountry, Partial<Rec
     ],
     education: [
       'https://education.indianexpress.com/feed/',
+    ],
+    scholarship: [
+      'https://education.indianexpress.com/feed/',
+      'https://www.scholars4dev.com/feed/',
+      'https://www.opportunitydesk.org/feed/',
     ],
     politics: [
       'https://swarajyamag.com/topic/rss',
@@ -559,7 +614,16 @@ export const TOPIC_REGISTRY: Record<string, string[]> = {
   education: [
     'https://feeds.bbci.co.uk/news/education/rss.xml',
     'https://www.theguardian.com/education/rss',
-    // removed: https://www.timeshighereducation.com/news/rss — 404
+  ],
+  scholarship: [
+    // Dedicated scholarship aggregators — global coverage
+    'https://www.scholars4dev.com/feed/',
+    'https://www.opportunitydesk.org/feed/',
+    'https://afterschoolafrica.com/feed/',
+    // Authoritative editorial sources
+    'https://www.theguardian.com/education/scholarships/rss',
+    'https://blog.scholarships.com/feed/',
+    'https://www.prospects.ac.uk/rss',
   ],
   politics: [
     'https://www.aljazeera.com/xml/rss/all.xml',
@@ -620,6 +684,10 @@ export const TOPIC_REGISTRY: Record<string, string[]> = {
 // ─── Google News section feeds ────────────────────────────────────────────────
 export const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
   education:     'https://news.google.com/rss/headlines/section/topic/EDUCATION?hl=en&gl=US&ceid=US:en',
+  // Scholarship has no dedicated Google News section — EDUCATION is the closest proxy.
+  // The country-scoped keyword search (step 2d) handles precision: "Nigeria scholarship",
+  // "UK Chevening scholarship", etc. — far more targeted than any section feed.
+  scholarship:   'https://news.google.com/rss/headlines/section/topic/EDUCATION?hl=en&gl=US&ceid=US:en',
   politics:      'https://news.google.com/rss/headlines/section/topic/NATION?hl=en&gl=US&ceid=US:en',
   finance:       'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en&gl=US&ceid=US:en',
   technology:    'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en&gl=US&ceid=US:en',
@@ -631,11 +699,6 @@ export const GOOGLE_TOPIC_FEEDS: Record<string, string> = {
 };
 
 // ─── Topic priority feeds ─────────────────────────────────────────────────────
-// Per-topic feeds that should be consulted ahead of generic international
-// fallbacks but after the country-specific feeds. Used for topics where
-// certain foreign jurisdictions are inherently relevant regardless of the
-// pipeline's home country — e.g. law pipelines always benefit from US and UK
-// legal news because those systems heavily influence other common law countries.
 export const TOPIC_PRIORITY_REGISTRY: Partial<Record<string, string[]>> = {
   law: [
     // US law
@@ -645,6 +708,19 @@ export const TOPIC_PRIORITY_REGISTRY: Partial<Record<string, string[]>> = {
     // UK law
     'https://lawgazette.co.uk/17.rss',
     'https://legalcheek.com/feed/',
+  ],
+  scholarship: [
+    // These run for every country before generic fallbacks.
+    // They cover major programs: Chevening, Rhodes, Fulbright, Commonwealth,
+    // Australia Awards, Vanier, DAAD, Erasmus, Gates Cambridge, Mastercard Foundation, etc.
+    'https://www.scholars4dev.com/feed/',
+    'https://www.opportunitydesk.org/feed/',
+    'https://afterschoolafrica.com/feed/',
+    // UK-authoritative: Chevening, Rhodes, and UK postgrad funding
+    'https://www.theguardian.com/education/scholarships/rss',
+    'https://www.prospects.ac.uk/rss',
+    // US financial aid and scholarship coverage
+    'https://blog.scholarships.com/feed/',
   ],
 };
 
@@ -664,6 +740,21 @@ export const TOPIC_ALIASES: Record<string, string> = {
   'education': 'education', 'school': 'education', 'academic': 'education',
   'learning': 'education', 'exam': 'education', 'university': 'education',
   'student': 'education', 'curriculum': 'education', 'teacher': 'education',
+  // ─── Scholarship aliases ──────────────────────────────────────────────────
+  'scholarship': 'scholarship', 'scholarships': 'scholarship',
+  'fellowship': 'scholarship', 'fellowships': 'scholarship',
+  'bursary': 'scholarship', 'bursaries': 'scholarship',
+  'studentship': 'scholarship', 'studentships': 'scholarship',
+  'financial aid': 'scholarship', 'study abroad': 'scholarship',
+  'chevening': 'scholarship', 'fulbright': 'scholarship',
+  'rhodes scholar': 'scholarship', 'rhodes scholarship': 'scholarship',
+  'commonwealth scholarship': 'scholarship', 'australia awards': 'scholarship',
+  'daad': 'scholarship', 'erasmus': 'scholarship',
+  'gates cambridge': 'scholarship', 'mastercard foundation': 'scholarship',
+  'vanier': 'scholarship', 'joint japan': 'scholarship',
+  'aga khan': 'scholarship', 'ford foundation': 'scholarship',
+  'rotary scholarship': 'scholarship', 'fulbright program': 'scholarship',
+  // ─────────────────────────────────────────────────────────────────────────
   'politics': 'politics', 'political': 'politics', 'government': 'politics',
   'election': 'politics', 'policy': 'politics', 'parliament': 'politics',
   'senate': 'politics', 'democracy': 'politics',

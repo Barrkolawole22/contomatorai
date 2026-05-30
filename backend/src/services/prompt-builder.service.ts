@@ -30,31 +30,39 @@ export type ImpactFormat =
   | 'contract_renewal_audit'
   | 'seasonal_timing_guide'
   | 'myth_buster'
-  | 'risk_explainer';
+  | 'risk_explainer'
+  | 'scholarship_new_opening'
+  | 'scholarship_deadline_alert'
+  | 'scholarship_how_to_apply'
+  | 'scholarship_results';
 
 // Maps each impact format to its appropriate base content mode.
-// Used by autonomous-pipeline to set contentMode when an impact format is detected.
 export const IMPACT_FORMAT_MODE: Record<ImpactFormat, ContentMode> = {
-  rate_change_alert:       'seo_blog',
-  policy_shift:            'news',
-  price_hike_survival:     'seo_blog',
-  feature_removal_warning: 'seo_blog',
-  new_law_breakdown:       'news',
-  scam_fraud_alert:        'news',
-  product_recall_guide:    'seo_blog',
-  market_crash_explainer:  'news',
-  subscription_trap:       'seo_blog',
-  comparison_flip:         'commercial',
-  deadline_reminder:       'seo_blog',
-  hidden_cost_revealer:    'seo_blog',
-  upgrade_decision:        'commercial',
-  data_breach_response:    'news',
-  trend_reality_check:     'opinion',
-  beginner_entry_point:    'seo_blog',
-  contract_renewal_audit:  'seo_blog',
-  seasonal_timing_guide:   'seo_blog',
-  myth_buster:             'opinion',
-  risk_explainer:          'seo_blog',
+  rate_change_alert:         'seo_blog',
+  policy_shift:              'news',
+  price_hike_survival:       'seo_blog',
+  feature_removal_warning:   'seo_blog',
+  new_law_breakdown:         'news',
+  scam_fraud_alert:          'news',
+  product_recall_guide:      'seo_blog',
+  market_crash_explainer:    'news',
+  subscription_trap:         'seo_blog',
+  comparison_flip:           'commercial',
+  deadline_reminder:         'seo_blog',
+  hidden_cost_revealer:      'seo_blog',
+  upgrade_decision:          'commercial',
+  data_breach_response:      'news',
+  trend_reality_check:       'opinion',
+  beginner_entry_point:      'seo_blog',
+  contract_renewal_audit:    'seo_blog',
+  seasonal_timing_guide:     'seo_blog',
+  myth_buster:               'opinion',
+  risk_explainer:            'seo_blog',
+  // Scholarship formats
+  scholarship_new_opening:   'seo_blog',
+  scholarship_deadline_alert:'seo_blog',
+  scholarship_how_to_apply:  'seo_blog',
+  scholarship_results:       'news',
 };
 
 type OpeningStyle =
@@ -112,7 +120,7 @@ interface PromptOptions {
   articleImages?: Array<{ url: string; alt: string }>;
 }
 
-// Deterministic pseudo-random pick from seed string — stable across retries
+// Deterministic pseudo-random pick from seed string
 function seededPick<T>(arr: T[], seed: string): T {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -194,7 +202,6 @@ Do NOT invent facts. If the source is thin, keep claims conservative.
     prompt += this.buildOpeningStyleBlock(openingStyle, mode, keyword);
     prompt += this.buildWritingRulesBlock(mode, options);
 
-    // Impact format replaces headline + structure blocks entirely
     if (useImpactFormat) {
       prompt += this.buildImpactFormatBlock(options.impactFormat!, keyword, options.niche);
     } else {
@@ -234,7 +241,6 @@ ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="$
       prompt += `FAQ SECTION: After the main body, add 4-5 questions real readers would type into Google. Answer each directly in plain language. No padding.\n\n`;
     }
 
-    // Impact format articles close with FAQ — no separate conclusion block needed
     if (!useImpactFormat) {
       prompt += this.buildConclusionBlock(mode, options);
     }
@@ -277,6 +283,8 @@ ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="$
 
   private getNicheContext(niche?: string): { actor: string; consumer: string; unit: string } {
     const n = (niche || '').toLowerCase();
+    if (/scholarship|fellowship|bursary|grant|studentship|study.abroad/.test(n))
+      return { actor: 'university, foundation, or government body', consumer: 'student or prospective applicant', unit: 'scholarship award, eligibility criteria, or application deadline' };
     if (/financ|bank|invest|loan|credit|insur|mortgage/.test(n))
       return { actor: 'bank, lender, or financial institution', consumer: 'account holder, borrower, or investor', unit: 'interest rate, fee, or yield' };
     if (/tech|saas|software|app|platform|startup/.test(n))
@@ -297,7 +305,7 @@ ${options.articleImages.map((img, i) => `Image ${i + 1}: src="${img.url}" alt="$
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // IMPACT FORMAT BLOCK — replaces headline + structure for all 20 formats
+  // IMPACT FORMAT BLOCK
   // ═══════════════════════════════════════════════════════════════════════
 
   private buildImpactFormatBlock(format: ImpactFormat, keyword: string, niche?: string): string {
@@ -667,6 +675,214 @@ Tone: Balanced and honest. Help the reader go in with open eyes — not scared o
 The FAQ is the final section. Do not add a separate conclusion after it.
 `,
 
+      // ═══════════════════════════════════════════════════════════════════
+      // SCHOLARSHIP FORMATS
+      // ═══════════════════════════════════════════════════════════════════
+
+      scholarship_new_opening: `IMPACT FORMAT — SCHOLARSHIP: NEW OPENING
+This is a scholarship opportunity article. The reader is a prospective applicant. The most important thing you can do for them is be specific, accurate, and complete. Every vague sentence costs them something real.
+
+Headline: "[Scholarship Name] [Year] Applications Are Now Open: Full Details, Eligibility, and Deadlines"
+Keep it under 14 words. Include the scholarship name and year. Never use "comprehensive" or "everything you need to know."
+
+H2: What This Scholarship Offers
+  Award value in concrete terms: is it full tuition only, or does it include a living stipend, flights, health insurance, and books?
+  State the host country, host institution(s) if fixed, duration (e.g. 1 year MSc, 2-year PhD), and number of places available if known.
+  Do NOT round figures or omit currency. "Up to $50,000" and "$50,000" are different claims.
+
+H2: Who Can Apply
+  Eligibility is the most-searched information. Be precise:
+  - Nationality/citizenship (which passport holders are eligible — named)
+  - Degree level (undergraduate, postgraduate taught, postgraduate research, PhD)
+  - Field of study (named disciplines, not vague clusters)
+  - Academic requirement (minimum GPA, degree classification, or equivalent — name the scale)
+  - Age limit if any
+  - Language requirement: IELTS/TOEFL minimum scores if stated
+  - Residency restriction if any (e.g. "must be resident in Nigeria at time of application")
+  If you don't know a criterion, say "not specified" — do not omit or invent.
+
+H2: What You'll Need to Prepare
+  Numbered checklist of required documents. For each item that takes time to obtain, add a brief note:
+  e.g. "Academic transcripts — allow 1–2 weeks from your institution"
+  e.g. "Reference letters — 2 required; request from supervisors now"
+  e.g. "Personal statement — 500–1,000 words; see tips in 'How to Apply'"
+  This section is a preparation checklist, not prose.
+
+H2: How to Apply
+  Numbered steps from start to finish:
+  1. Where to find the application portal (URL if available from source material)
+  2. Account creation / registration process
+  3. Key sections of the application form
+  4. Submission process and any confirmation steps
+  If the source doesn't contain portal details, say so and direct to the official scholarship website.
+
+H2: Key Dates
+  A clean, scannable list:
+  - Applications open: [date]
+  - Application deadline: [date, time, timezone if specified]
+  - Shortlisting / interview: [date or approximate period]
+  - Results notification: [date]
+  - Program start: [date]
+  Only include dates confirmed in the source material. Mark unknowns as "TBC" not omitted.
+
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Questions that a serious applicant would search for:
+  e.g. "Can I apply if I already have a degree from [country]?"
+  e.g. "Is this scholarship renewable for a second year?"
+  e.g. "Does this cover dependants or family members?"
+  Each answer: 2–3 sentences. Plain English. If the answer isn't in the source material, say so.
+
+Tone: Informative and practical. The reader is about to spend weeks on an application — they need facts, not enthusiasm. Do not describe the scholarship as "prestigious" or "life-changing." Let the details speak.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      scholarship_deadline_alert: `IMPACT FORMAT — SCHOLARSHIP: DEADLINE ALERT
+This is a time-sensitive article. The reader has seen the scholarship name somewhere and is checking if they can still apply. Your job is to answer that immediately, then help them act.
+
+Headline: "[Scholarship Name] Deadline Is [Specific Date]: What You Still Need to Submit"
+The date must be in the headline. If only a month is known, use the month. Never use vague framing like "closing soon."
+
+H2: How Much Time You Have
+  State the exact deadline: date, time, and timezone if specified. Then calculate days remaining from article publication. Be explicit: "As of [publication date], you have X days."
+  If the deadline has already passed, say so immediately and redirect to the next cycle.
+
+H2: The Scholarship at a Glance
+  3–4 sentences only: what it offers, who it's for, where it's based. Link to the official scholarship page.
+  This section is for readers who haven't seen the scholarship before. Keep it tight.
+
+H2: Your Application Checklist — What's Still Required
+  Numbered list of all required documents. Flag items with the longest lead times at the top:
+  - Items that take days or weeks (transcripts, reference letters, medical certificates): flagged with "START NOW"
+  - Items you can prepare quickly (personal statement, CV): listed below
+  If any document requires third-party action (e.g. references), state that explicitly.
+
+H2: Common Mistakes That Get Applications Rejected
+  3–5 specific mistakes known to cause rejection for this scholarship type or generally. Be concrete:
+  Not "ensure you meet the criteria" — instead "applying with an undergraduate degree when the scholarship requires a completed bachelor's before the program start date."
+  Not "proofread carefully" — instead "submitting a personal statement that doesn't address the scholarship's stated selection criteria."
+
+H2: How to Submit Before the Deadline
+  Numbered submission steps. Include:
+  - Portal URL (if available in source)
+  - What format documents should be in
+  - Whether a confirmation email is sent
+  - What to do if the portal is unresponsive near the deadline
+
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags focused on deadline-specific concerns:
+  e.g. "Can I submit after the deadline if my internet was down?"
+  e.g. "Is the deadline the same for all nationalities?"
+  e.g. "Can I update my application after submitting?"
+  2–3 sentences per answer. If unknown, say so.
+
+Tone: Urgent and practical. This article's only job is to get prepared readers to submit complete applications before the deadline. No padding, no inspiration — just the information they need to act.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      scholarship_how_to_apply: `IMPACT FORMAT — SCHOLARSHIP: HOW TO APPLY
+This is a process guide for a specific scholarship. The reader intends to apply. They need to know what the process actually involves — not a generic guide, but the specific steps for this program.
+
+Headline: "How to Apply for the [Scholarship Name]: A Step-by-Step Guide for [Year]"
+Under 14 words. Year must be included if known from source material.
+
+H2: Check Your Eligibility Before You Begin
+  Lay out the eligibility criteria as a decision checklist. Use a format the reader can check off:
+  - Nationality: [which passport holders]
+  - Degree level: [what's required]
+  - Field: [eligible disciplines]
+  - Academic standard: [GPA / classification requirement]
+  - Language: [IELTS/TOEFL requirement if any]
+  - Age: [if applicable]
+  End with: "If you meet all of the above, proceed. If any criterion doesn't apply to you, check the official guidelines before proceeding — some programs have exceptions not listed here."
+
+H2: Documents You Need to Prepare
+  Full list. For each document, state: what it is, what the scholarship specifically requires (length, format, who must sign it), and how long it typically takes to obtain.
+  Group by lead time:
+  - Documents requiring weeks (transcripts, sealed references, police clearance)
+  - Documents you write yourself (personal statement, research proposal, CV)
+  This is not a generic list — draw from the source material for requirements specific to this scholarship.
+
+H2: Writing Your Personal Statement
+  What the selection committee is actually looking for — draw from the scholarship's stated values, criteria, and mission if available in source material.
+  2–3 specific tips grounded in what this scholarship values (e.g. leadership, academic excellence, development impact).
+  What to avoid: 2 common personal statement mistakes for this type of scholarship.
+  Length and format requirement if stated.
+  Do NOT provide a personal statement template or example — that's a different article.
+
+H2: Completing the Application Portal
+  Numbered walk-through of the online application:
+  1. How to create an account or access the portal
+  2. Main sections of the form and what each asks for
+  3. How to upload documents (accepted formats, file size limits if known)
+  4. How referees are notified (automatic email or manual prompt)
+  5. How to review before submitting
+  6. Submission confirmation — what you receive
+
+H2: After You Apply: What Happens Next
+  Timeline from submission to result:
+  - When shortlisting typically happens
+  - Whether there is an interview stage (format: in-person, video call, panel)
+  - How and when results are communicated
+  - What to do if you don't hear back by the stated date
+
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Process-specific questions:
+  e.g. "Can I apply to multiple programs under the same scholarship?"
+  e.g. "What happens if my referee misses the reference deadline?"
+  e.g. "Can I apply in the same year I'm completing my degree?"
+  2–3 sentences per answer from source material. Mark unknowns as "not specified in official guidelines — contact the scholarship body directly."
+
+Tone: Clear, methodical, specific. The reader is about to invest significant time — they deserve a guide that reflects the actual process, not a generic template. Every sentence should reduce uncertainty or save them time.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
+      scholarship_results: `IMPACT FORMAT — SCHOLARSHIP: RESULTS ANNOUNCED
+This is a news-style article reporting scholarship results. The primary audience is: (a) unsuccessful applicants deciding whether to reapply, and (b) prospective applicants researching what it takes to win.
+
+Headline: "[Scholarship Name] [Year] Winners Announced: [Number] Scholars Selected from [Number] Countries / Applications"
+Use real numbers from the source material. If numbers aren't available, use: "[Scholarship Name] [Year] Cohort Announced: What the New Class Tells Future Applicants"
+Never use "prestigious" or "coveted" in the headline.
+
+H2: The [Year] Cohort at a Glance
+  Who was selected: total number of scholars, countries represented, degree levels (if available), fields of study breakdown.
+  If the source includes notable names or institutions, include them factually.
+  Keep this section data-led. If numbers aren't in the source, note that and report what is available.
+
+H2: What This Year's Selection Reveals
+  Patterns in the cohort that tell prospective applicants something useful:
+  - Were certain fields, nationalities, or degree levels overrepresented?
+  - Did the scholarship body release any statement about selection priorities this cycle?
+  - Were there any changes to the cohort profile compared to previous years (if source material includes this)?
+  This section requires careful reading of the source — do not fabricate trends. If the source doesn't contain enough information to identify patterns, say so honestly and keep this section brief.
+
+H2: What Unsuccessful Applicants Should Know
+  For the many who didn't make it this round:
+  - Did the scholarship body provide any feedback or guidance?
+  - Can they reapply, and if so, when?
+  - What the reapplication timeline looks like
+  If no guidance is available in the source, say: "The scholarship body has not released specific feedback for unsuccessful applicants. [Scholarship name] does / does not allow reapplication — check the official guidelines."
+
+H2: How to Prepare for the Next Round
+  Specific preparation steps based on what this year's cohort suggests:
+  - Academic preparation (if a GPA or classification pattern is evident)
+  - Experience or profile development (if themes emerge from winner profiles)
+  - Application timeline (when applications for the next cycle typically open)
+  These must trace to the source material or well-established facts about this scholarship. Do not invent success patterns.
+
+H2: Key Dates for the Next Application Cycle
+  Only include confirmed dates from source material. If not yet announced, state: "Application dates for the [next year] cycle have not yet been announced. Check [official URL or scholarship name] for updates."
+
+H2: Frequently Asked Questions
+  3 Q&As as <h3> tags. Questions from the perspective of both unsuccessful applicants and new prospects:
+  e.g. "Were the results released later than usual this year?"
+  e.g. "How many people applied vs. how many were selected?"
+  e.g. "What's the best way to strengthen a reapplication?"
+  2–3 sentences per answer. Base answers on source material only.
+
+Tone: Factual and useful. The reader may be disappointed — acknowledge that implicitly through the practical focus on next steps, not through emotive language. Report results accurately; analyse patterns fairly; and give future applicants something concrete to work with.
+The FAQ is the final section. Do not add a separate conclusion after it.
+`,
+
     };
 
     return `IMPACT FORMAT ENGAGED — override standard headline and structure:\n\n${nicheHint}${blocks[format]}\n`;
@@ -992,7 +1208,7 @@ Bad: "Navigating the Complex World of Cover Letters: A Comprehensive Guide"
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // STRUCTURE BLOCKS — options, not rigid templates
+  // STRUCTURE BLOCKS
   // ═══════════════════════════════════════════════════════════════════════
 
   private buildStructureBlock(mode: ContentMode, options: PromptOptions): string {

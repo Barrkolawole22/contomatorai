@@ -28,7 +28,43 @@ const VALID_IMPACT_FORMATS = new Set<string>([
   'subscription_trap', 'comparison_flip', 'deadline_reminder', 'hidden_cost_revealer',
   'upgrade_decision', 'data_breach_response', 'trend_reality_check', 'beginner_entry_point',
   'contract_renewal_audit', 'seasonal_timing_guide', 'myth_buster', 'risk_explainer',
+  // Scholarship formats
+  'scholarship_new_opening', 'scholarship_deadline_alert',
+  'scholarship_how_to_apply', 'scholarship_results',
 ]);
+
+// Niche → WordPress category name mapping.
+// The pipeline passes these to wordpressService.publishContent so posts land in
+// the right category automatically. Add more mappings here as new niches are added.
+const NICHE_CATEGORY_MAP: Record<string, string> = {
+  scholarship:   'Scholarship',
+  scholarships:  'Scholarship',
+  fellowship:    'Scholarship',
+  education:     'Education',
+  law:           'Law',
+  legal:         'Law',
+  finance:       'Finance',
+  technology:    'Technology',
+  tech:          'Technology',
+  health:        'Health',
+  politics:      'Politics',
+  business:      'Business',
+  sports:        'Sports',
+  entertainment: 'Entertainment',
+};
+
+/**
+ * Derive WordPress category names from a pipeline's niches array.
+ * Returns deduplicated category names ready to pass to publishContent.
+ */
+function deriveCategories(niches: string[]): string[] {
+  const cats = new Set<string>();
+  for (const niche of niches) {
+    const key = niche.toLowerCase().trim();
+    if (NICHE_CATEGORY_MAP[key]) cats.add(NICHE_CATEGORY_MAP[key]);
+  }
+  return Array.from(cats);
+}
 
 /**
  * Ask Gemini Flash: is this article relevant to the configured topics?
@@ -110,9 +146,13 @@ contract_renewal_audit — a contract or subscription renewal decision is trigge
 seasonal_timing_guide — timing-based advice for an action or purchase
 myth_buster — a common misconception needs correcting with evidence
 risk_explainer — risks of a decision or action should be explained before committing
+scholarship_new_opening — a scholarship or fellowship program has opened for applications
+scholarship_deadline_alert — a scholarship application deadline is approaching or has been announced
+scholarship_how_to_apply — guidance on how to apply for a specific scholarship or program
+scholarship_results — scholarship winners, awardees, or selection results have been announced
 
 Reply format (choose one):
-- YES:[format_id]   (relevant, with best format — e.g. YES:rate_change_alert)
+- YES:[format_id]   (relevant, with best format — e.g. YES:scholarship_new_opening)
 - YES:none          (relevant, but no format fits)
 - NO                (not relevant)
 
@@ -187,6 +227,14 @@ export class AutonomousPipelineService {
         return;
       }
 
+      // Derive WordPress categories once from the pipeline's niche list.
+      // These are passed to every publish/schedule call so posts land in
+      // the correct category automatically (e.g. "Scholarship" for scholarship niches).
+      const wpCategories = deriveCategories(niches);
+      if (wpCategories.length > 0) {
+        logger.info(`Pipeline ${configId}: WordPress categories derived from niches: [${wpCategories.join(', ')}]`);
+      }
+
       const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
       const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics, country as any);
 
@@ -225,7 +273,7 @@ export class AutonomousPipelineService {
               gateTopics,
               meaningfulNiches,
               country,
-              enableImpactFormats  // only classify format when feature is enabled
+              enableImpactFormats
             );
 
             if (!check.relevant) {
@@ -296,8 +344,6 @@ export class AutonomousPipelineService {
 
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
           const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
-
-          // Resolve content mode from impact format if set, otherwise fall through to default
           const contentMode = impactFormat ? IMPACT_FORMAT_MODE[impactFormat] : undefined;
 
           let articleResult: any;
@@ -389,6 +435,11 @@ export class AutonomousPipelineService {
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
                 featuredImageId,
+                // Pass derived categories so every post lands in the right WP category.
+                // getCategoryIds inside publishContent does a case-insensitive name match,
+                // so the category must already exist in WordPress or the post publishes
+                // without a category (it won't throw).
+                ...(wpCategories.length > 0 && { categories: wpCategories }),
               });
 
               if (publishResult.success) {
@@ -398,7 +449,7 @@ export class AutonomousPipelineService {
                 content.publishedAt = new Date();
                 await content.save();
                 pipelineRun.articlesPublished += 1;
-                logger.info(`Published "${item.title}" to WordPress`);
+                logger.info(`Published "${item.title}" to WordPress${wpCategories.length ? ` [categories: ${wpCategories.join(', ')}]` : ''}`);
               } else {
                 throw new Error(publishResult.error);
               }
