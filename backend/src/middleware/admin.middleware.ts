@@ -12,7 +12,7 @@ export interface IAuthRequest extends Request {
 }
 
 /**
- * Middleware to check if user is an admin
+ * Middleware to check if user is an admin or super_admin
  * Must be used after authMiddleware
  */
 export const adminMiddleware = (
@@ -31,16 +31,16 @@ export const adminMiddleware = (
       });
     }
 
-    // Check if user is admin (handle both lowercase and uppercase)
+    // Check if user is admin or super_admin
     const userRole = authReq.user.role?.toLowerCase();
-    if (userRole !== 'admin') {
+    if (userRole !== 'admin' && userRole !== 'super_admin') {
       return res.status(403).json({
         success: false,
         message: 'Admin access required. This action requires administrator privileges.',
       });
     }
 
-    // User is admin, proceed
+    // User is admin or super_admin, proceed
     next();
   } catch (error: any) {
     console.error('Admin middleware error:', error);
