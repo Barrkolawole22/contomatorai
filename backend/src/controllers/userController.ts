@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import User from '../models/user.model';
 import Content from '../models/content.model';
-import WordPressSite from '../models/wordPressSite.model';
+import Site from '../models/site.model';
 import mongoose from 'mongoose';
 
 interface AuthenticatedRequest extends Request {
@@ -181,17 +181,16 @@ export const getUserById = async (req: AuthenticatedRequest, res: Response): Pro
       ]).catch(() => []), // Handle if Content model doesn't exist
 
       // WordPress sites statistics
-      WordPressSite.aggregate([
-        { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-        {
-          $group: {
-            _id: null,
-            connectedSites: { $sum: 1 },
-            activeSites: { $sum: { $cond: [{ $eq: ['$status', 'connected'] }, 1, 0] } }
-          }
-        }
-      ]).catch(() => []), // Handle if WordPress model doesn't exist
-
+      Site.aggregate([
+  { $match: { owner: new mongoose.Types.ObjectId(userId) } },
+  {
+    $group: {
+      _id: null,
+      connectedSites: { $sum: 1 },
+      activeSites: { $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] } }
+    }
+  }
+]).catch(() => []),
       // Recent content for activity
       Content.find({ userId })
         .sort({ createdAt: -1 })
@@ -214,11 +213,10 @@ export const getUserById = async (req: AuthenticatedRequest, res: Response): Pro
     };
 
     // Calculate credits used (default starting credits - current credits)
-    const defaultStartingCredits = 10;
-    const creditsUsed = Math.max(0, defaultStartingCredits - (user.credits || 0));
+    const totalCreditsUsed = stats.totalWords || 0;
 
     // Generate recent activity from content
-    const recentActivity = recentContent.map((content: any, index: number) => ({
+    const recentActivity = recentContent.map((content: any) => ({
       id: content._id.toString(),
       type: 'content',
       description: `${content.status === 'published' ? 'Published' : 'Created'} ${content.type || 'content'}: "${content.title}"`,
@@ -283,7 +281,7 @@ export const getUserById = async (req: AuthenticatedRequest, res: Response): Pro
         publishedContent: stats.publishedContent,
         draftContent: stats.draftContent,
         connectedSites: siteStatsData.connectedSites,
-        totalCreditsUsed: creditsUsed,
+        totalCreditsUsed,
         totalWords: stats.totalWords,
         avgQualityScore: Math.round(stats.avgQualityScore || 0),
         lastActive: user.lastLogin ? user.lastLogin.toISOString() : user.updatedAt.toISOString()

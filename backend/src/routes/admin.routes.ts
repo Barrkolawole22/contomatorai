@@ -206,6 +206,17 @@ router.put('/content/:contentId', async (req, res) => {
   }
 });
 
+router.delete('/content/:contentId', async (req, res) => {
+  try {
+    const Content = require('../models/content.model').default;
+    const content = await Content.findByIdAndDelete(req.params.contentId);
+    if (!content) return res.status(404).json({ success: false, message: 'Content not found' });
+    res.json({ success: true, message: 'Content deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to delete content' });
+  }
+});
+
 // =============================================
 // 💰 FINANCIAL SECTION (REAL PROJECTIONS)
 // =============================================
