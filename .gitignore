@@ -30,4 +30,5 @@ Thumbs.db
 
 # Misc
 coverage/
-.nyc_output/
+.nyc_output/tree.txt 
+tree.txt 
