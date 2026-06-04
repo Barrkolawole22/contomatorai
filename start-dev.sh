@@ -6,7 +6,7 @@ echo "🚀 Starting Content Automation SaaS Development Environment"
 echo "📡 Checking MongoDB connection..."
 node -e "
 const mongoose = require('mongoose');
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://contentautomator:N2SMjXvGIs3QEKXr@contentautomator.tvofqju.mongodb.net/?retryWrites=true&w=majority&appName=contentautomator')
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => { console.log('✅ MongoDB connected'); process.exit(0); })
   .catch(() => { console.log('❌ MongoDB connection failed'); process.exit(1); });
 "

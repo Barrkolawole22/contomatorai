@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
-import type { ContentMode } from './prompt-builder.service';
+import type { ContentMode, ImpactFormat } from './prompt-builder.service';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-5-20251001';
 
@@ -15,10 +15,10 @@ interface GeneratedContent {
 }
 
 interface ContentGenerationOptions {
-  // Primary content mode
   contentMode?: ContentMode;
+  impactFormat?: ImpactFormat;
+  niche?: string;
 
-  // Legacy fields
   tone?: string;
   writingStyle?: string;
 
@@ -39,6 +39,10 @@ interface ContentGenerationOptions {
   includeComparisons?: boolean;
   targetKeywordDensity?: number;
   includeInternalLinks?: boolean;
+  includeExternalLinks?: boolean;
+  sourceUrl?: string;
+  sourceName?: string;
+  articleImages?: Array<{ url: string; alt: string }>;
   internalLinkSuggestions?: Array<{
     url: string;
     title: string;
@@ -53,7 +57,7 @@ export class ClaudeService {
   private client: Anthropic | null = null;
 
   constructor() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       logger.warn('ANTHROPIC_API_KEY not set – Claude will not be available');
       return;

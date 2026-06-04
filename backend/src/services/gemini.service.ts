@@ -67,7 +67,7 @@ export class GeminiService {
   };
 
   constructor() {
-    this.apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    this.apiKey = env.GEMINI_API_KEY;
 
     if (!this.apiKey) {
       throw new Error('GEMINI_API_KEY is required');

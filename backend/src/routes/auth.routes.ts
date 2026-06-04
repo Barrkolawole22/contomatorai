@@ -1,150 +1,80 @@
-// ENHANCED: src/routes/auth.routes.ts - Integrated with Profile System
+// backend/src/routes/auth.routes.ts
 import { Router } from 'express';
 import authController from '../controllers/auth.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { adminMiddleware } from '../middleware/admin.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
-import { 
+import {
   authRateLimitMiddleware,
   passwordResetRateLimitMiddleware,
-  emailVerificationRateLimitMiddleware 
+  emailVerificationRateLimitMiddleware,
 } from '../middleware/rateLimit.middleware';
-import { 
-  registerValidation, 
-  loginValidation, 
+import {
+  registerValidation,
+  loginValidation,
   refreshTokenValidation,
   changePasswordValidation,
   forgotPasswordValidation,
   resetPasswordValidation,
   updateProfileValidation,
-  resendVerificationValidation
+  resendVerificationValidation,
 } from '../validations/auth.validation';
-
-// Import profile controller for enhanced password management
 import { changePassword as profileChangePassword } from '../controllers/profile.controller';
-
-// === PASSPORT FOR OAUTH ===
 import passport from 'passport';
 import { env } from '../config/env';
-// ==========================
 
 const router = Router();
 
-// ===== PUBLIC ROUTES WITH SPECIFIC RATE LIMITING =====
+// ── Public routes ─────────────────────────────────────────────────────────────
 
-router.post('/register', 
-  authRateLimitMiddleware,
-  registerValidation,
-  validateRequest,
-  authController.register
-);
+router.post('/register', authRateLimitMiddleware, registerValidation, validateRequest, authController.register);
+router.post('/login', authRateLimitMiddleware, loginValidation, validateRequest, authController.login);
 
-router.post('/login', 
-  authRateLimitMiddleware,
-  loginValidation,
-  validateRequest,
-  authController.login
-);
-
-// ===== GOOGLE OAUTH ROUTES =====
-router.get('/google',
-  passport.authenticate('google', { 
-    scope: ['profile', 'email'],
-    session: false
-  })
-);
-
-router.get('/google/callback',
-  passport.authenticate('google', { 
+// Google OAuth
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
+router.get(
+  '/google/callback',
+  passport.authenticate('google', {
     failureRedirect: `${env.FRONTEND_URL}/login?error=google-auth-failed`,
-    session: false 
+    session: false,
   }),
   authController.googleCallback
 );
 
-// ===== TWITTER OAUTH ROUTES =====
-router.get('/twitter',
-  passport.authenticate('twitter', {
-    session: false
-  })
-);
-
-router.get('/twitter/callback',
+// Twitter OAuth
+router.get('/twitter', passport.authenticate('twitter', { session: false }));
+router.get(
+  '/twitter/callback',
   passport.authenticate('twitter', {
     failureRedirect: `${env.FRONTEND_URL}/login?error=twitter-auth-failed`,
-    session: false
+    session: false,
   }),
   authController.twitterCallback
 );
-// ===============================
 
-router.post('/refresh', 
-  refreshTokenValidation,
-  validateRequest,
-  authController.refreshToken
-);
+router.post('/refresh', refreshTokenValidation, validateRequest, authController.refreshToken);
+router.post('/forgot-password', passwordResetRateLimitMiddleware, forgotPasswordValidation, validateRequest, authController.forgotPassword);
+router.post('/reset-password', resetPasswordValidation, validateRequest, authController.resetPassword);
+router.get('/verify-email/:token', authController.verifyEmail);
+router.post('/resend-verification', emailVerificationRateLimitMiddleware, resendVerificationValidation, validateRequest, authController.resendVerification);
 
-router.post('/forgot-password', 
-  passwordResetRateLimitMiddleware,
-  forgotPasswordValidation,
-  validateRequest,
-  authController.forgotPassword
-);
+// ── Protected routes ──────────────────────────────────────────────────────────
 
-router.post('/reset-password', 
-  resetPasswordValidation,
-  validateRequest,
-  authController.resetPassword
-);
-
-router.get('/verify-email/:token', 
-  authController.verifyEmail
-);
-
-router.post('/resend-verification', 
-  emailVerificationRateLimitMiddleware,
-  resendVerificationValidation,
-  validateRequest,
-  authController.resendVerification
-);
-
-// TEMPORARY ADMIN ROUTES (remove in production)
-router.post('/create-admin', 
-  registerValidation,
-  validateRequest,
-  authController.createAdmin
-);
-
-router.post('/make-admin', 
-  authController.makeAdmin
-);
-
-// ===== PROTECTED ROUTES =====
 router.use(authMiddleware);
 
-// Basic auth operations
 router.post('/logout', authController.logout);
 router.get('/profile', authController.getProfile);
 router.get('/me', authController.getProfile);
+router.put('/profile', updateProfileValidation, validateRequest, authController.updateProfile);
 
-// Profile updates (using existing auth controller for backward compatibility)
-router.put('/profile', 
-  updateProfileValidation,
-  validateRequest,
-  authController.updateProfile
-);
+router.put('/change-password', changePasswordValidation, validateRequest, profileChangePassword);
+router.post('/change-password', changePasswordValidation, validateRequest, profileChangePassword);
 
-// ===== ENHANCED: Password change with improved security =====
-router.put('/change-password', 
-  changePasswordValidation,
-  validateRequest,
-  profileChangePassword
-);
+// Word credit operations
+router.post('/deduct-credits', authController.deductWordCredits);
+router.get('/credit-status', authController.getWordCreditStatus);
 
-// BACKWARD COMPATIBILITY: Also support the original endpoint
-router.post('/change-password', 
-  changePasswordValidation,
-  validateRequest,
-  profileChangePassword
-);
+// Admin-only: add credits to any user
+router.post('/add-credits', adminMiddleware, authController.addWordCredits);
 
 export default router;

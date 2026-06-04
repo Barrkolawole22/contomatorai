@@ -1,7 +1,7 @@
 // backend/src/middleware/admin.middleware.ts
 import { Request, Response, NextFunction } from 'express';
+import logger from '../config/logger';
 
-// Extend Request to include user
 export interface IAuthRequest extends Request {
   user?: {
     id: string;
@@ -12,8 +12,8 @@ export interface IAuthRequest extends Request {
 }
 
 /**
- * Middleware to check if user is an admin or super_admin
- * Must be used after authMiddleware
+ * Middleware to check if user is an admin or super_admin.
+ * Must be used after authMiddleware.
  */
 export const adminMiddleware = (
   req: Request,
@@ -23,7 +23,6 @@ export const adminMiddleware = (
   try {
     const authReq = req as IAuthRequest;
 
-    // Check if user exists (from authMiddleware)
     if (!authReq.user) {
       return res.status(401).json({
         success: false,
@@ -31,7 +30,6 @@ export const adminMiddleware = (
       });
     }
 
-    // Check if user is admin or super_admin
     const userRole = authReq.user.role?.toLowerCase();
     if (userRole !== 'admin' && userRole !== 'super_admin') {
       return res.status(403).json({
@@ -40,10 +38,9 @@ export const adminMiddleware = (
       });
     }
 
-    // User is admin or super_admin, proceed
     next();
   } catch (error: any) {
-    console.error('Admin middleware error:', error);
+    logger.error('Admin middleware error:', error);
     res.status(500).json({
       success: false,
       message: 'Authorization check failed',
@@ -51,5 +48,3 @@ export const adminMiddleware = (
     });
   }
 };
-
-console.log('✅ Admin middleware loaded successfully');

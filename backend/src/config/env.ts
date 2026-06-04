@@ -8,6 +8,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().min(1).max(65535).default(5000),
 
   ANTHROPIC_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
   NEWS_API_KEY: z.string().optional(),
 
   MONGODB_URI: z.string().url('Invalid MongoDB URI').default('mongodb://localhost:27017/content-automation'),
@@ -19,11 +20,6 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
   FRONTEND_URL: z.string().url('Invalid frontend URL').default('http://localhost:3000'),
-
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default('gpt-4o'),
-  OPENAI_MAX_TOKENS: z.coerce.number().positive().default(4000),
-  OPENAI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.8),
 
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-pro'),
@@ -99,7 +95,7 @@ const envSchema = z.object({
   MINIMUM_WORD_CREDITS_ALERT: z.coerce.number().default(1000),
 
   ADMIN_EMAIL: z.string().email('Invalid admin email').optional(),
-  ADMIN_PASSWORD: z.string().min(6, 'Admin password must be at least 6 characters').optional(),
+  ADMIN_PASSWORD: z.string().min(12, 'Admin password must be at least 12 characters').optional(),
   ENABLE_ADMIN_CREATION: z.coerce.boolean().default(true),
   ADMIN_PANEL_ENABLED: z.coerce.boolean().default(true),
   ADMIN_PANEL_PATH: z.string().default('/admin'),
@@ -182,7 +178,9 @@ if (isDevelopment()) {
   console.log(`🚀 Server will run on port ${env.PORT}`);
   console.log(`🗄️  Database: ${getDatabaseUri()}`);
   console.log(`🌐 Frontend URL: ${env.FRONTEND_URL}`);
-  console.log(`🤖 OpenAI API: ${env.OPENAI_API_KEY ? 'Configured ✓' : 'Not configured'}`);
+  console.log(`🤖 Gemini API: ${env.GEMINI_API_KEY ? 'Configured ✓' : 'Not configured'}`);
+  console.log(`🧠 OpenAI API: ${env.OPENAI_API_KEY ? 'Configured ✓' : 'Not configured'}`);
+  console.log(`💎 Anthropic API: ${env.ANTHROPIC_API_KEY ? 'Configured ✓' : 'Not configured'}`);
   console.log(`⚡ Groq API: ${env.GROQ_API_KEY ? 'Configured ✓' : 'Not configured'}`);
   console.log(`🤗 Hugging Face API: ${env.HUGGINGFACE_API_KEY ? 'Configured ✓' : 'Not configured'}`);
   console.log(`💳 Paystack: ${env.PAYSTACK_SECRET_KEY ? 'Configured ✓' : 'Not configured'}`);

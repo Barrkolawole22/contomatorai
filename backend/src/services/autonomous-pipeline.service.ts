@@ -1,11 +1,11 @@
 // backend/src/services/autonomous-pipeline.service.ts
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import PipelineConfig from '../models/pipelineConfig.model';
 import PipelineRun from '../models/pipelineRun.model';
 import rssService from './rss.service';
 import scraperService from './scraper.service';
 import { ScrapedImage } from './scraper.service';
 import aiService from './ai.service';
+import geminiService from './gemini.service';
 import Site from '../models/site.model';
 import Content from '../models/content.model';
 import User from '../models/user.model';
@@ -13,7 +13,6 @@ import wordpressService from './wordpress.service';
 import sitemapCrawlerService from './sitemap-crawler.service';
 import { IMPACT_FORMAT_MODE } from './prompt-builder.service';
 import type { ImpactFormat } from './prompt-builder.service';
-import { env } from '../config/env';
 import logger from '../config/logger';
 
 const MIN_CONTEXT_WORDS = 100;
@@ -21,21 +20,16 @@ const PUBLISH_STAGGER_MINUTES = 120;
 const MAX_INTERNAL_LINK_SUGGESTIONS = 3;
 const RSS_FETCH_MULTIPLIER = 10;
 
-// Full list of valid impact format IDs for response parsing
 const VALID_IMPACT_FORMATS = new Set<string>([
   'rate_change_alert', 'policy_shift', 'price_hike_survival', 'feature_removal_warning',
   'new_law_breakdown', 'scam_fraud_alert', 'product_recall_guide', 'market_crash_explainer',
   'subscription_trap', 'comparison_flip', 'deadline_reminder', 'hidden_cost_revealer',
   'upgrade_decision', 'data_breach_response', 'trend_reality_check', 'beginner_entry_point',
   'contract_renewal_audit', 'seasonal_timing_guide', 'myth_buster', 'risk_explainer',
-  // Scholarship formats
   'scholarship_new_opening', 'scholarship_deadline_alert',
   'scholarship_how_to_apply', 'scholarship_results',
 ]);
 
-// Niche → WordPress category name mapping.
-// The pipeline passes these to wordpressService.publishContent so posts land in
-// the right category automatically. Add more mappings here as new niches are added.
 const NICHE_CATEGORY_MAP: Record<string, string> = {
   scholarship:   'Scholarship',
   scholarships:  'Scholarship',
@@ -53,10 +47,6 @@ const NICHE_CATEGORY_MAP: Record<string, string> = {
   entertainment: 'Entertainment',
 };
 
-/**
- * Derive WordPress category names from a pipeline's niches array.
- * Returns deduplicated category names ready to pass to publishContent.
- */
 function deriveCategories(niches: string[]): string[] {
   const cats = new Set<string>();
   for (const niche of niches) {
@@ -68,8 +58,10 @@ function deriveCategories(niches: string[]): string[] {
 
 /**
  * Ask Gemini Flash: is this article relevant to the configured topics?
- * When classifyFormat=true, also identifies the best impact format in the same call.
- * Returns relevant (bool), reason (string), and optionally suggestedFormat.
+ * Routed through geminiService so all Gemini config, API key handling, and
+ * error handling remain in one place. Previously instantiated
+ * GoogleGenerativeAI directly, which created a parallel code path that
+ * bypassed any changes made to gemini.service.ts.
  */
 async function aiRelevanceCheck(
   title: string,
@@ -80,17 +72,6 @@ async function aiRelevanceCheck(
   classifyFormat: boolean = false
 ): Promise<{ relevant: boolean; reason: string; suggestedFormat?: ImpactFormat }> {
   try {
-    const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: {
-        maxOutputTokens: 100,
-        temperature: 0,
-        thinkingConfig: { thinkingBudget: 0 },
-      } as any,
-    });
-
     const countryLabel =
       country === 'Global' ? 'worldwide sources'
       : country === 'NG' ? 'Nigeria'
@@ -160,13 +141,27 @@ Reply with nothing else.` : `
 
 Reply with only YES or NO.`;
 
-    const result = await model.generateContent(relevanceSection + formatSection);
-    const answer = result.response.text().trim().toUpperCase();
-    const relevant = answer.startsWith('YES');
+    const prompt = relevanceSection + formatSection;
+
+    // Route through geminiService (flash variant, minimal tokens, no grounding needed)
+    const result = await geminiService.generateBlogPost(prompt, {
+      modelVariant: 'flash',
+      wordCount: 10, // signal: we want a very short response
+      customPrompt: '', // override any default system prompt additions
+    } as any);
+
+    // geminiService returns a content object; the raw text is in .content
+    // Strip HTML tags that the service may add around the response
+    const rawText = (result?.content || result?.title || '')
+      .replace(/<[^>]*>/g, '')
+      .trim()
+      .toUpperCase();
+
+    const relevant = rawText.startsWith('YES');
 
     let suggestedFormat: ImpactFormat | undefined;
     if (relevant && classifyFormat) {
-      const match = answer.match(/^YES:([A-Z_]+)/i);
+      const match = rawText.match(/^YES:([A-Z_]+)/i);
       const formatId = match?.[1]?.toLowerCase();
       if (formatId && formatId !== 'none' && VALID_IMPACT_FORMATS.has(formatId)) {
         suggestedFormat = formatId as ImpactFormat;
@@ -175,11 +170,13 @@ Reply with only YES or NO.`;
 
     return {
       relevant,
-      reason: relevant ? 'AI approved' : `AI rejected: not relevant to [${relevanceTopics.join(', ')}]`,
+      reason: relevant
+        ? 'AI approved'
+        : `AI rejected: not relevant to [${relevanceTopics.join(', ')}]`,
       suggestedFormat,
     };
   } catch (err: any) {
-    logger.warn(`AI relevance check failed: ${err.message} -- defaulting to allow`);
+    logger.warn(`AI relevance check failed: ${err.message} — defaulting to allow`);
     return { relevant: true, reason: 'AI check failed — allowed by default' };
   }
 }
@@ -218,7 +215,7 @@ export class AutonomousPipelineService {
         : [(config as any).niche].filter(Boolean);
 
       if (niches.length === 0) {
-        logger.warn(`Pipeline ${configId} has no niches configured -- run aborted`);
+        logger.warn(`Pipeline ${configId} has no niches configured — run aborted`);
         pipelineRun.status = 'completed';
         pipelineRun.completedAt = new Date();
         await pipelineRun.save();
@@ -227,19 +224,18 @@ export class AutonomousPipelineService {
         return;
       }
 
-      // Derive WordPress categories once from the pipeline's niche list.
-      // These are passed to every publish/schedule call so posts land in
-      // the correct category automatically (e.g. "Scholarship" for scholarship niches).
       const wpCategories = deriveCategories(niches);
       if (wpCategories.length > 0) {
-        logger.info(`Pipeline ${configId}: WordPress categories derived from niches: [${wpCategories.join(', ')}]`);
+        logger.info(`Pipeline ${configId}: WordPress categories derived: [${wpCategories.join(', ')}]`);
       }
 
       const fetchLimit = config.maxArticlesPerRun * RSS_FETCH_MULTIPLIER;
-      const rssItems = await rssService.fetchItemsForNiches(niches, fetchLimit, 24, relevanceTopics, country as any);
+      const rssItems = await rssService.fetchItemsForNiches(
+        niches, fetchLimit, 24, relevanceTopics, country as any
+      );
 
       if (rssItems.length === 0) {
-        logger.warn(`No RSS items found for niches [${niches.join(', ')}] -- run aborted`);
+        logger.warn(`No RSS items found for niches [${niches.join(', ')}] — run aborted`);
         pipelineRun.status = 'completed';
         pipelineRun.completedAt = new Date();
         await pipelineRun.save();
@@ -248,19 +244,23 @@ export class AutonomousPipelineService {
         return;
       }
 
-      logger.info(`Pipeline ${configId}: fetched ${rssItems.length} RSS candidates for niches [${niches.join(', ')}] (target: ${config.maxArticlesPerRun})`);
+      logger.info(
+        `Pipeline ${configId}: fetched ${rssItems.length} RSS candidates for niches ` +
+        `[${niches.join(', ')}] (target: ${config.maxArticlesPerRun})`
+      );
 
       const internalLinks = await this.fetchInternalLinks(siteIdString, niches[0]);
       let articleIndex = 0;
 
       for (const item of rssItems) {
         if (pipelineRun.articlesGenerated >= config.maxArticlesPerRun) {
-          logger.info(`Pipeline ${configId}: reached target of ${config.maxArticlesPerRun} article(s) -- stopping early`);
+          logger.info(
+            `Pipeline ${configId}: reached target of ${config.maxArticlesPerRun} article(s) — stopping early`
+          );
           break;
         }
 
         try {
-          // ── AI RELEVANCE GATE ─────────────────────────────────────────────
           const meaningfulNiches = niches.filter(n => n.length >= 4);
           const gateTopics = relevanceTopics.length > 0 ? relevanceTopics : meaningfulNiches;
 
@@ -282,19 +282,23 @@ export class AutonomousPipelineService {
               continue;
             }
 
-            logger.info(`AI gate approved "${item.title}"${check.suggestedFormat ? ` [format: ${check.suggestedFormat}]` : ''}`);
+            logger.info(
+              `AI gate approved "${item.title}"` +
+              `${check.suggestedFormat ? ` [format: ${check.suggestedFormat}]` : ''}`
+            );
             suggestedFormat = check.suggestedFormat;
           }
-          // ─────────────────────────────────────────────────────────────────
 
-          // Filter by allowedImpactFormats if the user restricted which formats to use
           let impactFormat: ImpactFormat | undefined;
           if (enableImpactFormats && suggestedFormat) {
-            const isAllowed = allowedImpactFormats.length === 0 || allowedImpactFormats.includes(suggestedFormat);
+            const isAllowed =
+              allowedImpactFormats.length === 0 || allowedImpactFormats.includes(suggestedFormat);
             if (isAllowed) {
               impactFormat = suggestedFormat;
             } else {
-              logger.info(`Format "${suggestedFormat}" not in allowedImpactFormats — using standard generation`);
+              logger.info(
+                `Format "${suggestedFormat}" not in allowedImpactFormats — using standard generation`
+              );
             }
           }
 
@@ -312,21 +316,25 @@ export class AutonomousPipelineService {
               sourceUrl = scraped.sourceUrl || item.link;
               if (scraped.wordCount >= MIN_CONTEXT_WORDS) {
                 contextSeed = scraped.text;
-                logger.info(`Scraped ${scraped.wordCount} words and ${scrapedImages.length} images from ${item.link}`);
+                logger.info(
+                  `Scraped ${scraped.wordCount} words and ${scrapedImages.length} images from ${item.link}`
+                );
               } else {
                 contextSeed = [item.title, item.description, scraped.text].filter(Boolean).join('\n\n');
-                logger.warn(`Low scraped context for "${item.title}" (${scraped.wordCount} words) -- proceeding with grounding`);
+                logger.warn(
+                  `Low scraped context for "${item.title}" (${scraped.wordCount} words) — proceeding with grounding`
+                );
               }
             } catch (scrapeErr: any) {
-              logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} -- using RSS seed`);
+              logger.warn(`Scraper failed for ${item.link}: ${scrapeErr.message} — using RSS seed`);
             }
           } else {
-            logger.info(`Google News URL for "${item.title}" -- skipping scrape, relying on grounding`);
+            logger.info(`Google News URL for "${item.title}" — skipping scrape, relying on grounding`);
           }
 
           const isDuplicate = await this.isDuplicateTopic(config.userId.toString(), item.title);
           if (isDuplicate) {
-            logger.warn(`Skipping "${item.title}" -- duplicate topic published within last 30 days`);
+            logger.warn(`Skipping "${item.title}" — duplicate topic published within last 30 days`);
             pipelineRun.results.push({ topic: item.title, status: 'skipped', error: 'Duplicate topic' });
             continue;
           }
@@ -340,13 +348,16 @@ export class AutonomousPipelineService {
             contextSeed,
           ].join('\n');
 
-          logger.info(`Generating article for "${item.title}" (context: ${additionalContext.length} chars, images: ${scrapedImages.length}, format: ${impactFormat || 'standard'})`);
+          logger.info(
+            `Generating article for "${item.title}" ` +
+            `(context: ${additionalContext.length} chars, images: ${scrapedImages.length}, ` +
+            `format: ${impactFormat || 'standard'})`
+          );
 
           const modelToUse: any = proQuotaExhausted ? 'gemini' : config.aiModel;
           const trimmedLinks = internalLinks.slice(0, MAX_INTERNAL_LINK_SUGGESTIONS);
           const contentMode = impactFormat ? IMPACT_FORMAT_MODE[impactFormat] : undefined;
 
-          let articleResult: any;
           const generationOptions = {
             wordCount: config.targetWordCount,
             additionalContext,
@@ -362,12 +373,13 @@ export class AutonomousPipelineService {
             ...(impactFormat && { impactFormat, contentMode, niche: niches[0] }),
           };
 
+          let articleResult: any;
           try {
             articleResult = await aiService.generateBlogPost(item.title, modelToUse, generationOptions);
           } catch (genErr: any) {
             if (this.isQuotaError(genErr) && !proQuotaExhausted) {
               proQuotaExhausted = true;
-              logger.warn('Pro quota exhausted -- remaining articles this run will use Flash');
+              logger.warn('Pro quota exhausted — remaining articles this run will use Flash');
               articleResult = await aiService.generateBlogPost(item.title, 'gemini', generationOptions);
             } else {
               throw genErr;
@@ -378,9 +390,13 @@ export class AutonomousPipelineService {
             .replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '')
             .trim();
 
-          const metaDescription = await this.generateMetaDescription(articleResult.title, cleanedContent);
+          const metaDescription = await this.generateMetaDescription(
+            articleResult.title,
+            cleanedContent
+          );
 
-          const staggeredMinutes = config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
+          const staggeredMinutes =
+            config.previewWindowMinutes + articleIndex * PUBLISH_STAGGER_MINUTES;
           const scheduledDate =
             config.previewWindowMinutes > 0
               ? new Date(Date.now() + staggeredMinutes * 60 * 1000)
@@ -409,16 +425,25 @@ export class AutonomousPipelineService {
               content._id?.toString(),
               'generation'
             );
-            logger.info(`Credits deducted: ${articleResult.creditsUsed} for user ${config.userId.toString()} (remaining: ${user.wordCredits})`);
+            logger.info(
+              `Credits deducted: ${articleResult.creditsUsed} for user ${config.userId.toString()} ` +
+              `(remaining: ${user.wordCredits})`
+            );
           } else {
             logger.warn(`Could not find user ${config.userId.toString()} to deduct credits`);
           }
 
-          pipelineRun.results.push({ topic: item.title, contentId: content._id as any, status: 'generated' });
+          pipelineRun.results.push({
+            topic: item.title,
+            contentId: content._id as any,
+            status: 'generated',
+          });
           pipelineRun.articlesGenerated += 1;
 
           if (scheduledDate) {
-            logger.info(`Content ${content._id} scheduled at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`);
+            logger.info(
+              `Content ${content._id} scheduled at ${scheduledDate.toISOString()} (+${staggeredMinutes} min)`
+            );
           } else {
             const fullSite = await Site.findById(siteObjectId).select('+applicationPassword');
             if (fullSite) {
@@ -429,16 +454,14 @@ export class AutonomousPipelineService {
                   scrapedImages[0].url,
                   scrapedImages[0].alt || articleResult.title
                 );
-                if (featuredImageId) logger.info(`Uploaded featured image (ID: ${featuredImageId})`);
+                if (featuredImageId) {
+                  logger.info(`Uploaded featured image (ID: ${featuredImageId})`);
+                }
               }
 
               const publishResult = await wordpressService.publishContent(fullSite, content, {
                 status: 'publish',
                 featuredImageId,
-                // Pass derived categories so every post lands in the right WP category.
-                // getCategoryIds inside publishContent does a case-insensitive name match,
-                // so the category must already exist in WordPress or the post publishes
-                // without a category (it won't throw).
                 ...(wpCategories.length > 0 && { categories: wpCategories }),
               });
 
@@ -449,7 +472,10 @@ export class AutonomousPipelineService {
                 content.publishedAt = new Date();
                 await content.save();
                 pipelineRun.articlesPublished += 1;
-                logger.info(`Published "${item.title}" to WordPress${wpCategories.length ? ` [categories: ${wpCategories.join(', ')}]` : ''}`);
+                logger.info(
+                  `Published "${item.title}" to WordPress` +
+                  `${wpCategories.length ? ` [categories: ${wpCategories.join(', ')}]` : ''}`
+                );
               } else {
                 throw new Error(publishResult.error);
               }
@@ -474,32 +500,45 @@ export class AutonomousPipelineService {
     await pipelineRun.save();
     config.lastRunAt = new Date();
     await config.save();
-    logger.info(`Pipeline ${configId} run complete -- generated: ${pipelineRun.articlesGenerated}, published: ${pipelineRun.articlesPublished}`);
+    logger.info(
+      `Pipeline ${configId} run complete — generated: ${pipelineRun.articlesGenerated}, ` +
+      `published: ${pipelineRun.articlesPublished}`
+    );
   }
 
   private async isDuplicateTopic(userId: string, topic: string): Promise<boolean> {
     try {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const keywords = topic.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 4).slice(0, 4);
+      const keywords = topic
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '')
+        .split(/\s+/)
+        .filter(w => w.length > 4)
+        .slice(0, 4);
       if (keywords.length === 0) return false;
 
       const recentContent = await Content.find({
         userId,
         status: { $in: ['published', 'scheduled', 'draft'] },
         createdAt: { $gte: thirtyDaysAgo },
-      }).select('keyword title').lean();
+      })
+        .select('keyword title')
+        .lean();
 
       for (const existing of recentContent) {
-        const existingText = `${existing.keyword || ''} ${existing.title || ''}`.toLowerCase();
+        const existingText =
+          `${existing.keyword || ''} ${existing.title || ''}`.toLowerCase();
         const matchCount = keywords.filter(kw => existingText.includes(kw)).length;
         if (matchCount >= 2) {
-          logger.info(`Duplicate detected: "${topic}" matches "${existing.title}" (${matchCount} overlaps)`);
+          logger.info(
+            `Duplicate detected: "${topic}" matches "${existing.title}" (${matchCount} overlaps)`
+          );
           return true;
         }
       }
       return false;
     } catch (err: any) {
-      logger.warn(`Duplicate check failed: ${err.message} -- proceeding anyway`);
+      logger.warn(`Duplicate check failed: ${err.message} — proceeding anyway`);
       return false;
     }
   }
@@ -512,21 +551,41 @@ export class AutonomousPipelineService {
       logger.info(`Found ${links.length} internal link candidates for niche "${niche}"`);
       return links;
     } catch (err: any) {
-      logger.warn(`Internal link fetch failed: ${err.message} -- skipping`);
+      logger.warn(`Internal link fetch failed: ${err.message} — skipping`);
       return [];
     }
   }
 
+  /**
+   * Generates a meta description for a given article.
+   * Routed through geminiService (flash) so all API key handling,
+   * config changes, and error handling remain in one place.
+   * Previously instantiated GoogleGenerativeAI directly.
+   */
   private async generateMetaDescription(title: string, content: string): Promise<string> {
     try {
-      const apiKey = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { maxOutputTokens: 80, temperature: 0.3 } });
-      const plainText = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 500);
-      const result = await model.generateContent(
-        `Write a compelling SEO meta description in exactly 1 sentence, maximum 155 characters. Output only the description, nothing else.\n\nTitle: ${title}\nContent: ${plainText}`
-      );
-      const meta = result.response.text().trim().substring(0, 155);
+      const plainText = content
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 500);
+
+      const prompt =
+        `Write a compelling SEO meta description in exactly 1 sentence, maximum 155 characters. ` +
+        `Output only the description, nothing else.\n\n` +
+        `Title: ${title}\nContent: ${plainText}`;
+
+      const result = await geminiService.generateBlogPost(prompt, {
+        modelVariant: 'flash',
+        wordCount: 10,
+        customPrompt: '',
+      } as any);
+
+      const meta = (result?.content || result?.title || '')
+        .replace(/<[^>]*>/g, '')
+        .trim()
+        .substring(0, 155);
+
       logger.info(`Generated meta description: ${meta.substring(0, 60)}...`);
       return meta;
     } catch (err: any) {
@@ -537,7 +596,12 @@ export class AutonomousPipelineService {
 
   private isQuotaError(err: any): boolean {
     const msg = err?.message || '';
-    return msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('rate limit');
+    return (
+      msg.includes('429') ||
+      msg.includes('quota') ||
+      msg.includes('RESOURCE_EXHAUSTED') ||
+      msg.includes('rate limit')
+    );
   }
 }
 

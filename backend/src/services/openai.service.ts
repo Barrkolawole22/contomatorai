@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import promptBuilder from './prompt-builder.service';
+import type { ContentMode, ImpactFormat } from './prompt-builder.service';
 
 interface GeneratedContent {
   title: string;
@@ -12,7 +13,13 @@ interface GeneratedContent {
 }
 
 interface ContentGenerationOptions {
+  contentMode?: ContentMode;
+  impactFormat?: ImpactFormat;
+  niche?: string;
+
   tone?: string;
+  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
+
   wordCount?: number;
   targetAudience?: string;
   includeHeadings?: boolean;
@@ -23,7 +30,6 @@ interface ContentGenerationOptions {
   contentIntent?: 'informational' | 'navigational' | 'commercial' | 'transactional';
   customPrompt?: string;
   additionalContext?: string;
-  writingStyle?: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
   seoFocus?: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
   callToAction?: string;
   includeStatistics?: boolean;
@@ -31,6 +37,10 @@ interface ContentGenerationOptions {
   includeComparisons?: boolean;
   targetKeywordDensity?: number;
   includeInternalLinks?: boolean;
+  includeExternalLinks?: boolean;
+  sourceUrl?: string;
+  sourceName?: string;
+  articleImages?: Array<{ url: string; alt: string }>;
   internalLinkSuggestions?: Array<{
     url: string;
     title: string;
@@ -45,7 +55,7 @@ export class OpenAIService {
   private client: OpenAI | null = null;
 
   constructor() {
-    const apiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) {
       logger.warn('OPENAI_API_KEY not set – GPT-4o will not be available');
       return;
@@ -70,7 +80,6 @@ export class OpenAIService {
 
         const content = await this.generateContent(keyword, options, targetWordCount, attempt);
 
-        // Basic internal link validation (same as Gemini)
         if (options.includeInternalLinks && options.internalLinkSuggestions?.length) {
           const validation = promptBuilder.validateInternalLinks(content.content, options.internalLinkSuggestions);
           if (!validation.valid && attempt < maxRetries) {
@@ -113,10 +122,7 @@ export class OpenAIService {
       throw new Error('Generated content too short');
     }
 
-    // Clean up and parse similar to Gemini
-    let cleanedText = generatedText;
-    // Replace markdown code fences if any
-    cleanedText = cleanedText.replace(/```html\s*/gi, '').replace(/```/g, '');
+    const cleanedText = generatedText.replace(/```html\s*/gi, '').replace(/```/g, '');
     const parsed = this.parseContent(cleanedText, keyword);
     const wordCount = this.countWords(parsed.content);
     logger.info(`OpenAI generated ${wordCount} words`);
@@ -134,10 +140,14 @@ export class OpenAIService {
     let content = text;
     if (h1Match) content = text.replace(h1Match[0], '').trim();
     if (!content.includes('<h1>') && !content.includes('<h2>') && !content.includes('<p>')) {
-      // plain text fallback
       content = `<h1>${title}</h1>\n\n` + content.split('\n').filter(p => p.trim()).map(p => `<p>${p}</p>`).join('\n');
     }
-    return { title, content: content.trim(), wordCount: this.countWords(content), summary: content.substring(0, 200) + '...' };
+    return {
+      title,
+      content: content.trim(),
+      wordCount: this.countWords(content),
+      summary: content.substring(0, 200) + '...'
+    };
   }
 
   async checkService(): Promise<{ status: string; model: string }> {

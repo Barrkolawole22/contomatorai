@@ -1,10 +1,13 @@
-// backend/src/controllers/billing.controller.ts - PAYSTACK VERSION (COMPLETE FIXED)
+// backend/src/controllers/billing.controller.ts
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import axios from 'axios';
 import User from '../models/user.model';
 import SubscriptionPlan from '../models/subscriptionPlan.model';
 import CreditPackage from '../models/creditPackage.model';
 import logger from '../config/logger';
+import { env } from '../config/env';
+import { formatUserResponse } from '../utils/formatUserResponse';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -15,89 +18,35 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
-// Paystack configuration
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 
-// Dynamic getter for Paystack API to ensure environment variables are fully loaded
+/**
+ * Returns an Axios instance authorised with the Paystack secret key.
+ * Throws early if the key is not configured so callers receive a clear
+ * error instead of a silent Paystack 401.
+ */
 const getPaystackAPI = () => {
+  const secretKey = env.PAYSTACK_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error('PAYSTACK_SECRET_KEY is not configured. Cannot make Paystack API calls.');
+  }
   return axios.create({
     baseURL: PAYSTACK_BASE_URL,
     headers: {
-      'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY || ''}`,
-      'Content-Type': 'application/json'
-    }
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/json',
+    },
   });
 };
 
-// User response formatter
-const formatUserResponse = (userData: any) => {
-  let userPlan = 'free';
-  if (userData.subscription?.plan) {
-    userPlan = userData.subscription.plan;
-  } else if (userData.subscriptionStatus) {
-    userPlan = userData.subscriptionStatus;
-  } else if (userData.plan) {
-    userPlan = userData.plan;
-  }
-  
-  return {
-    id: userData._id.toString(),
-    email: userData.email,
-    name: userData.name,
-    role: userData.role || 'user',
-    isAdmin: ['admin', 'super_admin'].includes(userData.role),
-    
-    wordCredits: userData.wordCredits || 0,
-    totalWordsUsed: userData.totalWordsUsed || 0,
-    currentMonthUsage: userData.currentMonthUsage || 0,
-    
-    credits: userData.credits || userData.wordCredits || 0,
-    usageCredits: userData.wordCredits || 0,
-    creditUsage: userData.currentMonthUsage || 0,
-    
-    status: userData.status || 'active',
-    emailVerified: userData.emailVerified || false,
-    createdAt: userData.createdAt?.toISOString() || new Date().toISOString(),
-    lastLogin: userData.lastLogin?.toISOString() || undefined,
-    
-    plan: userPlan,
-    subscriptionStatus: userData.subscriptionStatus || userPlan,
-    maxCredits: userData.wordCredits || 0,
-    
-    avatar: userData.avatar,
-    phone: userData.phone,
-    location: userData.location,
-    company: userData.company,
-    bio: userData.bio,
-    timezone: userData.timezone,
-    language: userData.language,
-    
-    preferences: userData.preferences,
-    
-    security: userData.security ? {
-      twoFactorEnabled: userData.security.twoFactorEnabled || false,
-      lastPasswordChange: userData.security.lastPasswordChange?.toISOString(),
-      loginHistory: userData.security.loginHistory?.slice(0, 5).map((entry: any) => ({
-        ip: entry.ip,
-        location: entry.location,
-        timestamp: entry.timestamp?.toISOString(),
-        device: entry.device
-      })) || []
-    } : undefined,
-    
-    subscription: userData.subscription
-  };
-};
-
 class BillingController {
-  // Get available subscription plans and word packages
   async getWordPackages(req: AuthenticatedRequest, res: Response) {
     try {
       const currency = (req.query.currency as string) || 'NGN';
 
       const [dbPlans, dbTopups] = await Promise.all([
         SubscriptionPlan.find({ isActive: true }),
-        CreditPackage.find({ isActive: true }).sort({ wordCount: 1 })
+        CreditPackage.find({ isActive: true }).sort({ wordCount: 1 }),
       ]);
 
       const subscriptionPlans = dbPlans.map(plan => {
@@ -110,12 +59,12 @@ class BillingController {
           wordsPerMonth: (plan as any).wordsPerMonth,
           price: priceObj.amount,
           formattedPrice: priceObj.formatted,
-          currency: currency,
+          currency,
           features: (plan as any).features,
           isPopular: (plan as any).isPopular,
           autonomousPipeline: (plan as any).autonomousPipeline,
           knowledgebaseDocs: (plan as any).knowledgebaseDocs,
-          allowedModels: [] 
+          allowedModels: [],
         };
       });
 
@@ -129,42 +78,28 @@ class BillingController {
           wordCount: (pkg as any).wordCount,
           price: priceObj.amount,
           formattedPrice: priceObj.formatted,
-          currency: currency,
+          currency,
           features: (pkg as any).features,
-          isPopular: (pkg as any).isPopular
+          isPopular: (pkg as any).isPopular,
         };
       });
 
-      return res.json({
-        success: true,
-        data: {
-          subscriptionPlans,
-          topupPackages
-        }
-      });
+      return res.json({ success: true, data: { subscriptionPlans, topupPackages } });
     } catch (error: any) {
       logger.error('Error fetching billing packages:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to fetch billing packages'
-      });
+      return res.status(500).json({ success: false, message: 'Failed to fetch billing packages' });
     }
   }
 
-  // Get user's billing information
   async getBillingInfo(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ success: false, message: 'Unauthorized' });
-      }
+      if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-      const user = await User.findById(userId)
-        .select('wordCredits totalWordsUsed currentMonthUsage wordUsageHistory wordPackagePurchases subscription preferences');
-
-      if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found' });
-      }
+      const user = await User.findById(userId).select(
+        'wordCredits totalWordsUsed currentMonthUsage wordUsageHistory wordPackagePurchases subscription preferences'
+      );
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
       const monthlyStats = user.getWordUsageStats('month');
       const weeklyStats = user.getWordUsageStats('week');
@@ -182,7 +117,7 @@ class BillingController {
           amountPaid: purchase.amountPaid,
           currency: purchase.currency,
           purchaseDate: purchase.purchaseDate,
-          formattedAmount: (purchase.amountPaid / 100).toFixed(2)
+          formattedAmount: (purchase.amountPaid / 100).toFixed(2),
         }));
 
       return res.json({
@@ -193,15 +128,11 @@ class BillingController {
           currentMonthUsage: user.currentMonthUsage,
           plan: user.subscription?.plan || 'free',
           preferredCurrency: (user as any).preferences?.currency || 'NGN',
-          usageStats: {
-            daily: dailyStats,
-            weekly: weeklyStats,
-            monthly: monthlyStats
-          },
+          usageStats: { daily: dailyStats, weekly: weeklyStats, monthly: monthlyStats },
           purchaseHistory,
           needsRefill: user.wordCredits < 1000,
-          user: formatUserResponse(user)
-        }
+          user: formatUserResponse(user),
+        },
       });
     } catch (error: any) {
       logger.error('Error fetching billing info:', error);
@@ -209,7 +140,6 @@ class BillingController {
     }
   }
 
-  // PAYSTACK: Initialize transaction
   async initializeTransaction(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -217,7 +147,6 @@ class BillingController {
 
       const { packageId, planId, currency = 'NGN' } = req.body;
       const targetId = packageId || planId;
-
       if (!targetId) {
         return res.status(400).json({ success: false, message: 'Package ID or Plan ID is required' });
       }
@@ -229,7 +158,6 @@ class BillingController {
       if (!targetItem) {
         targetItem = await CreditPackage.findOne({ packageId: targetId, isActive: true });
       }
-
       if (!targetItem) {
         return res.status(404).json({ success: false, message: 'Plan or package not found' });
       }
@@ -238,11 +166,18 @@ class BillingController {
       const priceInCents = priceObj.amount;
       const itemWordCount = targetItem.wordCount || targetItem.wordsPerMonth;
 
-      const paystackAPI = getPaystackAPI();
+      let paystackAPI;
+      try {
+        paystackAPI = getPaystackAPI();
+      } catch (keyError: any) {
+        logger.error('Paystack key error:', keyError.message);
+        return res.status(500).json({ success: false, message: 'Payment provider is not configured' });
+      }
+
       const response = await paystackAPI.post('/transaction/initialize', {
         email: user.email,
         amount: priceInCents,
-        currency: currency,
+        currency,
         metadata: {
           userId: user._id.toString(),
           packageId: targetId,
@@ -250,11 +185,11 @@ class BillingController {
           wordCount: itemWordCount.toString(),
           custom_fields: [
             { display_name: 'User Name', variable_name: 'user_name', value: user.name },
-            { display_name: 'Package', variable_name: 'package_name', value: targetItem.name }
-          ]
+            { display_name: 'Package', variable_name: 'package_name', value: targetItem.name },
+          ],
         },
-        callback_url: `${process.env.FRONTEND_URL}/dashboard/billing?verify=1`,
-        channels: ['card', 'bank', 'ussd', 'mobile_money']
+        callback_url: `${env.FRONTEND_URL}/dashboard/billing?verify=1`,
+        channels: ['card', 'bank', 'ussd', 'mobile_money'],
       });
 
       if (response.data.status) {
@@ -268,51 +203,63 @@ class BillingController {
               name: targetItem.name,
               description: targetItem.description,
               wordCount: itemWordCount,
-              formattedPrice: priceObj.formatted
-            }
-          }
+              formattedPrice: priceObj.formatted,
+            },
+          },
         });
       } else {
         throw new Error('Failed to initialize transaction');
       }
     } catch (error: any) {
       logger.error('Error initializing transaction:', error.response?.data || error.message);
-      return res.status(500).json({ success: false, message: error.response?.data?.message || 'Failed to initialize payment' });
+      return res.status(500).json({
+        success: false,
+        message: error.response?.data?.message || 'Failed to initialize payment',
+      });
     }
   }
 
-  // PAYSTACK: Verify transaction (Bulletproof Version)
   async verifyTransaction(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
       const { reference } = req.body;
-      if (!reference) return res.status(400).json({ success: false, message: 'Transaction reference is required' });
+      if (!reference) {
+        return res.status(400).json({ success: false, message: 'Transaction reference is required' });
+      }
 
-      const paystackAPI = getPaystackAPI();
-      
+      let paystackAPI;
+      try {
+        paystackAPI = getPaystackAPI();
+      } catch (keyError: any) {
+        logger.error('Paystack key error:', keyError.message);
+        return res.status(500).json({ success: false, message: 'Payment provider is not configured' });
+      }
+
       let response;
       try {
         response = await paystackAPI.get(`/transaction/verify/${reference}`);
       } catch (apiError: any) {
         logger.error('Paystack API Error:', apiError.response?.data || apiError.message);
-        return res.status(400).json({ 
-          success: false, 
-          message: apiError.response?.data?.message || 'Failed to connect to Paystack verification API' 
+        return res.status(400).json({
+          success: false,
+          message: apiError.response?.data?.message || 'Failed to connect to Paystack verification API',
         });
       }
 
       if (!response.data.status) {
-        return res.status(400).json({ success: false, message: response.data.message || 'Payment verification failed' });
+        return res.status(400).json({
+          success: false,
+          message: response.data.message || 'Payment verification failed',
+        });
       }
 
       const transactionData = response.data.data;
-      
       if (transactionData.status !== 'success') {
-        return res.status(400).json({ 
-          success: false, 
-          message: `Payment was not completed. Status is: ${transactionData.status}` 
+        return res.status(400).json({
+          success: false,
+          message: `Payment was not completed. Status is: ${transactionData.status}`,
         });
       }
 
@@ -322,7 +269,10 @@ class BillingController {
       }
 
       if (!metadata || metadata.userId !== userId) {
-        return res.status(403).json({ success: false, message: 'Unauthorized transaction access (Metadata mismatch)' });
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized transaction access (metadata mismatch)',
+        });
       }
 
       const user = await User.findById(userId);
@@ -330,25 +280,30 @@ class BillingController {
       if (!targetItem) {
         targetItem = await CreditPackage.findOne({ packageId: metadata.packageId });
       }
-
       if (!user || !targetItem) {
-        return res.status(404).json({ success: false, message: 'User or purchased package not found in database' });
+        return res.status(404).json({
+          success: false,
+          message: 'User or purchased package not found in database',
+        });
       }
 
       const purchasesArray = user.wordPackagePurchases || [];
       const existingPurchase = purchasesArray.find(
         (purchase: any) => purchase.stripePaymentIntentId === reference
       );
-
       if (existingPurchase) {
         const updatedUser = await User.findById(userId);
         return res.json({
           success: true,
           message: 'Payment already processed',
-          data: { wordCreditsAdded: 0, newWordCreditsBalance: user.wordCredits, user: formatUserResponse(updatedUser) }
+          data: {
+            wordCreditsAdded: 0,
+            newWordCreditsBalance: user.wordCredits,
+            user: formatUserResponse(updatedUser),
+          },
         });
       }
-      
+
       const isSubscriptionPlan = !!targetItem.planId;
       const targetId = targetItem.planId || targetItem.packageId;
       const itemWordCount = targetItem.wordCount || targetItem.wordsPerMonth;
@@ -359,36 +314,35 @@ class BillingController {
         (user as any).subscription.plan = planName;
         (user as any).subscription.status = 'active';
         (user as any).subscription.currentPeriodStart = new Date();
-        (user as any).subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); 
+        (user as any).subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       }
 
       if (typeof user.addWordCredits === 'function') {
-         await user.addWordCredits(itemWordCount, {
-           packageId: targetId,
-           packageName: targetItem.name,
-           amountPaid: transactionData.amount,
-           currency: transactionData.currency,
-           stripePaymentIntentId: reference,
-           status: 'completed'
-         });
+        await user.addWordCredits(itemWordCount, {
+          packageId: targetId,
+          packageName: targetItem.name,
+          amountPaid: transactionData.amount,
+          currency: transactionData.currency,
+          stripePaymentIntentId: reference,
+          status: 'completed',
+        });
       } else {
-         user.wordCredits = (user.wordCredits || 0) + itemWordCount;
-         if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
-         user.wordPackagePurchases.push({
-           packageId: targetId,
-           packageName: targetItem.name,
-           wordsIncluded: itemWordCount,
-           amountPaid: transactionData.amount,
-           currency: transactionData.currency,
-           purchaseDate: new Date(),
-           stripePaymentIntentId: reference,
-           status: 'completed'
-         });
+        user.wordCredits = (user.wordCredits || 0) + itemWordCount;
+        if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
+        user.wordPackagePurchases.push({
+          packageId: targetId,
+          packageName: targetItem.name,
+          wordsIncluded: itemWordCount,
+          amountPaid: transactionData.amount,
+          currency: transactionData.currency,
+          purchaseDate: new Date(),
+          stripePaymentIntentId: reference,
+          status: 'completed',
+        });
+        await user.save();
       }
 
-      await user.save();
       const updatedUser = await User.findById(userId);
-
       return res.json({
         success: true,
         message: 'Payment verified and word credits added',
@@ -399,37 +353,55 @@ class BillingController {
           newPlan: updatedUser?.subscription?.plan,
           amountPaid: `${transactionData.currency} ${(transactionData.amount / 100).toFixed(2)}`,
           transactionReference: reference,
-          user: formatUserResponse(updatedUser)
-        }
+          user: formatUserResponse(updatedUser),
+        },
       });
     } catch (error: any) {
       logger.error('Error verifying transaction:', error);
-      return res.status(500).json({ success: false, message: error.message || 'Failed to verify payment (Server Crash)' });
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to verify payment',
+      });
     }
   }
 
-  // PAYSTACK: Webhook handler
+  /**
+   * PAYSTACK WEBHOOK
+   *
+   * The route must be registered with express.raw() body parsing so that
+   * req.body is a raw Buffer — do NOT run express.json() before this route.
+   * The HMAC is computed directly over the Buffer, which matches what
+   * Paystack signs. Calling JSON.stringify(Buffer) would produce the wrong
+   * digest and every webhook would be rejected.
+   */
   async handlePaystackWebhook(req: Request, res: Response): Promise<void> {
-    const hash = req.headers['x-paystack-signature'];
-    if (!hash) {
+    const signature = req.headers['x-paystack-signature'];
+    if (!signature) {
       res.status(400).send('No signature');
       return;
     }
 
     try {
-      const secretKey = process.env.PAYSTACK_SECRET_KEY || '';
-      const crypto = require('crypto');
+      const secretKey = env.PAYSTACK_SECRET_KEY;
+      if (!secretKey) {
+        logger.error('Webhook received but PAYSTACK_SECRET_KEY is not configured');
+        res.status(500).send('Payment provider not configured');
+        return;
+      }
+
+      // req.body must be a Buffer (express.raw middleware on this route)
       const computedHash = crypto
         .createHmac('sha512', secretKey)
-        .update(JSON.stringify(req.body))
+        .update(req.body as Buffer)
         .digest('hex');
 
-      if (hash !== computedHash) {
+      if (signature !== computedHash) {
         res.status(400).send('Invalid signature');
         return;
       }
 
-      const event = req.body;
+      // Body is a Buffer here; parse it to JSON for the event data
+      const event = JSON.parse((req.body as Buffer).toString('utf8'));
 
       switch (event.event) {
         case 'charge.success':
@@ -441,11 +413,9 @@ class BillingController {
       }
 
       res.json({ success: true });
-      return;
     } catch (error: any) {
       logger.error('Error processing webhook:', error);
       res.status(500).json({ error: 'Webhook processing failed' });
-      return;
     }
   }
 
@@ -467,16 +437,14 @@ class BillingController {
       if (!targetItem) {
         targetItem = await CreditPackage.findOne({ packageId });
       }
-
       if (!user || !targetItem) return;
 
       const purchasesArray = user.wordPackagePurchases || [];
       const existingPurchase = purchasesArray.find(
         (purchase: any) => purchase.stripePaymentIntentId === reference
       );
-
       if (existingPurchase) return;
-      
+
       const isSubscriptionPlan = !!targetItem.planId;
       const targetId = targetItem.planId || targetItem.packageId;
       const itemWordCount = targetItem.wordCount || targetItem.wordsPerMonth;
@@ -490,30 +458,29 @@ class BillingController {
       }
 
       if (typeof user.addWordCredits === 'function') {
-         await user.addWordCredits(itemWordCount, {
-           packageId: targetId,
-           packageName: targetItem.name,
-           amountPaid: data.amount,
-           currency: data.currency,
-           stripePaymentIntentId: reference,
-           status: 'completed'
-         });
+        await user.addWordCredits(itemWordCount, {
+          packageId: targetId,
+          packageName: targetItem.name,
+          amountPaid: data.amount,
+          currency: data.currency,
+          stripePaymentIntentId: reference,
+          status: 'completed',
+        });
       } else {
-         user.wordCredits = (user.wordCredits || 0) + itemWordCount;
-         if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
-         user.wordPackagePurchases.push({
-           packageId: targetId,
-           packageName: targetItem.name,
-           wordsIncluded: itemWordCount,
-           amountPaid: data.amount,
-           currency: data.currency,
-           purchaseDate: new Date(),
-           stripePaymentIntentId: reference,
-           status: 'completed'
-         });
-         await user.save();
+        user.wordCredits = (user.wordCredits || 0) + itemWordCount;
+        if (!user.wordPackagePurchases) user.wordPackagePurchases = [];
+        user.wordPackagePurchases.push({
+          packageId: targetId,
+          packageName: targetItem.name,
+          wordsIncluded: itemWordCount,
+          amountPaid: data.amount,
+          currency: data.currency,
+          purchaseDate: new Date(),
+          stripePaymentIntentId: reference,
+          status: 'completed',
+        });
+        await user.save();
       }
-
     } catch (error: any) {
       logger.error('Error handling charge success webhook:', error);
     }
@@ -528,7 +495,7 @@ class BillingController {
 
       const userId = metadata?.userId;
       const reference = data.reference;
-      
+
       if (userId) {
         const user = await User.findById(userId);
         if (user && user.wordPackagePurchases) {
@@ -546,7 +513,6 @@ class BillingController {
     }
   }
 
-  // Get usage analytics
   async getUsageAnalytics(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -558,12 +524,13 @@ class BillingController {
       if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
       const validTimeframes = ['day', 'week', 'month', 'all'];
-      const validatedTimeframe = validTimeframes.includes(timeframe as string) 
-        ? (timeframe as 'day' | 'week' | 'month' | 'all') : 'month';
+      const validatedTimeframe = validTimeframes.includes(timeframe as string)
+        ? (timeframe as 'day' | 'week' | 'month' | 'all')
+        : 'month';
 
       const stats = user.getWordUsageStats(validatedTimeframe);
       const usageByDate: { [key: string]: number } = {};
-      
+
       const usageHistoryArray = user.wordUsageHistory || [];
       usageHistoryArray.forEach((entry: any) => {
         if (entry.date >= stats.startDate) {
@@ -585,15 +552,15 @@ class BillingController {
           chartData,
           currentCredits: user.wordCredits,
           totalWordsUsed: user.totalWordsUsed,
-          user: formatUserResponse(user) 
-        }
+          user: formatUserResponse(user),
+        },
       });
     } catch (error: any) {
+      logger.error('Error fetching usage analytics:', error);
       return res.status(500).json({ success: false, message: 'Failed to fetch usage analytics' });
     }
   }
 
-  // Manual user data refresh endpoint
   async refreshUserData(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -605,14 +572,14 @@ class BillingController {
       return res.json({
         success: true,
         message: 'User data refreshed successfully',
-        user: formatUserResponse(user)
+        user: formatUserResponse(user),
       });
     } catch (error: any) {
+      logger.error('Error refreshing user data:', error);
       return res.status(500).json({ success: false, message: 'Failed to refresh user data' });
     }
   }
 
-  // Get current user plan endpoint
   async getUserPlan(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -621,23 +588,27 @@ class BillingController {
       const user = await User.findById(userId);
       if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-      const plan = (user as any).subscription?.plan || (user as any).plan || (user as any).subscriptionStatus || 'free';
+      const plan =
+        (user as any).subscription?.plan ||
+        (user as any).plan ||
+        (user as any).subscriptionStatus ||
+        'free';
 
       return res.json({
         success: true,
         data: {
-          plan: plan,
+          plan,
           subscription: user.subscription,
           subscriptionStatus: user.subscriptionStatus,
-          userPlan: (user as any).plan
-        }
+          userPlan: (user as any).plan,
+        },
       });
     } catch (error: any) {
+      logger.error('Error getting user plan:', error);
       return res.status(500).json({ success: false, message: 'Failed to get user plan' });
     }
   }
 
-  // Update preferred currency
   async updateCurrency(req: AuthenticatedRequest, res: Response) {
     try {
       const userId = req.user?.id;
@@ -650,14 +621,9 @@ class BillingController {
 
       (user as any).preferences = (user as any).preferences || {};
       (user as any).preferences.currency = currency;
-      
       await user.save();
 
-      return res.json({ 
-        success: true, 
-        message: 'Currency updated successfully',
-        currency: currency
-      });
+      return res.json({ success: true, message: 'Currency updated successfully', currency });
     } catch (error: any) {
       logger.error('Error updating currency:', error);
       return res.status(500).json({ success: false, message: 'Failed to update currency' });

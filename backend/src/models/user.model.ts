@@ -29,8 +29,15 @@ interface WordPackagePurchase {
   status: 'pending' | 'completed' | 'failed' | 'refunded';
 }
 
-// Unified plan type to prevent Mongoose validation crashes across different fields
-type PlanName = 'free' | 'basic' | 'pro' | 'agency' | 'enterprise' | 'starter' | 'professional' | 'premium';
+type PlanName =
+  | 'free'
+  | 'basic'
+  | 'pro'
+  | 'agency'
+  | 'enterprise'
+  | 'starter'
+  | 'professional'
+  | 'premium';
 
 export interface IUser extends Document {
   email: string;
@@ -39,17 +46,14 @@ export interface IUser extends Document {
   role: 'user' | 'admin' | 'super_admin' | 'moderator';
   status: 'active' | 'inactive' | 'suspended';
 
-  // OAuth IDs — all independent top-level fields
   googleId?: string;
   twitterId?: string;
   twitterUsername?: string;
 
-  // Legacy word credits (backward compat)
   wordCredits: number;
   totalWordsUsed: number;
   currentMonthUsage: number;
 
-  // Dual-balance billing
   preferredCurrency: 'USD' | 'NGN';
   subscriptionPlan: PlanName;
   subscriptionWordBalance: number;
@@ -87,7 +91,7 @@ export interface IUser extends Document {
 
   byoApiEnabled?: boolean;
   apiKeys?: {
-    openai?: string;
+    // openai intentionally removed — not part of the stack
     anthropic?: string;
     gemini?: string;
   };
@@ -141,7 +145,6 @@ export interface IUser extends Document {
   createdAt: Date;
   updatedAt: Date;
 
-  // Instance methods
   comparePassword(candidatePassword: string): Promise<boolean>;
   generatePasswordResetToken(): string;
   generateEmailVerificationToken(): string;
@@ -159,73 +162,92 @@ export interface IUser extends Document {
   parseUserAgent(userAgent: string): string;
 }
 
-// ─── Sub-schemas ────────────────────────────────────────────────────────────
+// ─── Sub-schemas ──────────────────────────────────────────────────────────────
 
-const WordUsageSchema = new Schema({
-  date: { type: Date, default: Date.now },
-  wordsUsed: { type: Number, required: true, min: 0 },
-  contentId: { type: String },
-  operation: {
-    type: String,
-    enum: ['generation', 'edit', 'bulk_generation'],
-    default: 'generation',
+const WordUsageSchema = new Schema(
+  {
+    date: { type: Date, default: Date.now },
+    wordsUsed: { type: Number, required: true, min: 0 },
+    contentId: { type: String },
+    operation: {
+      type: String,
+      enum: ['generation', 'edit', 'bulk_generation'],
+      default: 'generation',
+    },
   },
-}, { _id: false });
+  { _id: false }
+);
 
-const WordPackagePurchaseSchema = new Schema({
-  packageId: { type: String, required: true },
-  packageName: { type: String, required: true },
-  wordsIncluded: { type: Number, required: true, min: 0 },
-  amountPaid: { type: Number, required: true, min: 0 },
-  currency: { type: String, default: 'NGN' },
-  purchaseDate: { type: Date, default: Date.now },
-  stripePaymentIntentId: { type: String },
-  status: {
-    type: String,
-    enum: ['pending', 'completed', 'failed', 'refunded'],
-    default: 'pending',
+const WordPackagePurchaseSchema = new Schema(
+  {
+    packageId: { type: String, required: true },
+    packageName: { type: String, required: true },
+    wordsIncluded: { type: Number, required: true, min: 0 },
+    amountPaid: { type: Number, required: true, min: 0 },
+    currency: { type: String, default: 'NGN' },
+    purchaseDate: { type: Date, default: Date.now },
+    stripePaymentIntentId: { type: String },
+    status: {
+      type: String,
+      enum: ['pending', 'completed', 'failed', 'refunded'],
+      default: 'pending',
+    },
   },
-}, { _id: false });
+  { _id: false }
+);
 
-const LoginHistorySchema = new Schema({
-  ip: { type: String, required: true },
-  location: { type: String, default: 'Unknown' },
-  timestamp: { type: Date, default: Date.now },
-  device: { type: String, default: 'Unknown' },
-  userAgent: { type: String },
-}, { _id: false });
-
-const SecuritySchema = new Schema({
-  twoFactorEnabled: { type: Boolean, default: false },
-  lastPasswordChange: { type: Date, default: Date.now },
-  loginHistory: [LoginHistorySchema],
-  twoFactorSecret: { type: String, select: false },
-  backupCodes: [{ type: String, select: false }],
-}, { _id: false });
-
-// FIXED: Added all possible plan enums to match the seed data and controller
-const allowedPlans = ['free', 'basic', 'pro', 'agency', 'enterprise', 'starter', 'professional', 'premium'];
-
-const SubscriptionSchema = new Schema({
-  plan: {
-    type: String,
-    enum: allowedPlans,
-    default: 'free',
+const LoginHistorySchema = new Schema(
+  {
+    ip: { type: String, required: true },
+    location: { type: String, default: 'Unknown' },
+    timestamp: { type: Date, default: Date.now },
+    device: { type: String, default: 'Unknown' },
+    userAgent: { type: String },
   },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'cancelled', 'past_due'],
-    default: 'inactive',
-  },
-  stripeCustomerId: { type: String },
-  stripeSubscriptionId: { type: String },
-  currentPeriodStart: { type: Date },
-  currentPeriodEnd: { type: Date },
-  expiresAt: { type: Date },
-  cancelAtPeriodEnd: { type: Boolean, default: false },
-}, { _id: false });
+  { _id: false }
+);
 
-// ─── Main schema ─────────────────────────────────────────────────────────────
+const SecuritySchema = new Schema(
+  {
+    twoFactorEnabled: { type: Boolean, default: false },
+    lastPasswordChange: { type: Date, default: Date.now },
+    loginHistory: [LoginHistorySchema],
+    twoFactorSecret: { type: String, select: false },
+    backupCodes: [{ type: String, select: false }],
+  },
+  { _id: false }
+);
+
+const allowedPlans = [
+  'free',
+  'basic',
+  'pro',
+  'agency',
+  'enterprise',
+  'starter',
+  'professional',
+  'premium',
+];
+
+const SubscriptionSchema = new Schema(
+  {
+    plan: { type: String, enum: allowedPlans, default: 'free' },
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'cancelled', 'past_due'],
+      default: 'inactive',
+    },
+    stripeCustomerId: { type: String },
+    stripeSubscriptionId: { type: String },
+    currentPeriodStart: { type: Date },
+    currentPeriodEnd: { type: Date },
+    expiresAt: { type: Date },
+    cancelAtPeriodEnd: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+// ─── Main schema ──────────────────────────────────────────────────────────────
 
 const UserSchema: Schema<IUser> = new Schema<IUser>(
   {
@@ -250,20 +272,9 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       maxlength: [100, 'Name cannot exceed 100 characters'],
     },
 
-    googleId: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
-    twitterId: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
-    twitterUsername: {
-      type: String,
-      sparse: true,
-    },
+    googleId: { type: String, unique: true, sparse: true },
+    twitterId: { type: String, unique: true, sparse: true },
+    twitterUsername: { type: String, sparse: true },
 
     role: {
       type: String,
@@ -276,20 +287,14 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       default: 'active',
     },
 
-    wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'] },
+    // Default of 5000 here is a fallback only. Registration handlers must read
+    // from env.DEFAULT_FREE_WORD_CREDITS so the value stays in one place.
+    wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'], max: 10_000_000 },
     totalWordsUsed: { type: Number, default: 0, min: 0 },
     currentMonthUsage: { type: Number, default: 0, min: 0 },
 
-    preferredCurrency: {
-      type: String,
-      enum: ['USD', 'NGN'],
-      default: 'NGN',
-    },
-    subscriptionPlan: {
-      type: String,
-      enum: allowedPlans, // FIXED
-      default: 'free',
-    },
+    preferredCurrency: { type: String, enum: ['USD', 'NGN'], default: 'NGN' },
+    subscriptionPlan: { type: String, enum: allowedPlans, default: 'free' },
     subscriptionWordBalance: { type: Number, default: 0, min: 0 },
     topupWordBalance: { type: Number, default: 0, min: 0 },
     subscriptionRenewalDate: { type: Date, default: undefined },
@@ -321,19 +326,16 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
 
     lastLogin: { type: Date, default: undefined },
     loginCount: { type: Number, default: 0, min: 0 },
+    // Tracks the last time word credits were actually consumed, not last save.
     lastUsageDate: { type: Date, default: undefined },
 
-    subscriptionStatus: {
-      type: String,
-      enum: allowedPlans, // FIXED
-      default: 'free',
-    },
+    subscriptionStatus: { type: String, enum: allowedPlans, default: 'free' },
     subscriptionId: { type: String, default: undefined },
     subscriptionExpiry: { type: Date, default: undefined },
 
     byoApiEnabled: { type: Boolean, default: false },
     apiKeys: {
-      openai: { type: String, select: false },
+      // openai removed — not part of the active stack
       anthropic: { type: String, select: false },
       gemini: { type: String, select: false },
     },
@@ -397,7 +399,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
   {
     timestamps: true,
     toJSON: {
-      transform: function (doc, ret) {
+      transform: function (_doc, ret) {
         delete ret.password;
         delete ret.resetPasswordToken;
         delete ret.emailVerificationToken;
@@ -414,7 +416,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
   }
 );
 
-// ─── Indexes ─────────────────────────────────────────────────────────────────
+// ─── Indexes ──────────────────────────────────────────────────────────────────
 
 UserSchema.index({ googleId: 1 });
 UserSchema.index({ twitterId: 1 });
@@ -426,7 +428,7 @@ UserSchema.index({ wordCredits: 1 });
 UserSchema.index({ totalWordsUsed: 1 });
 UserSchema.index({ subscriptionPlan: 1 });
 
-// ─── Hooks ───────────────────────────────────────────────────────────────────
+// ─── Hooks ────────────────────────────────────────────────────────────────────
 
 UserSchema.pre<IUser>('save', async function (next) {
   if (!this.isModified('password') || !this.password) return next();
@@ -439,15 +441,19 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
+// Monthly usage reset: only runs if lastUsageDate was explicitly set
+// (i.e. during actual credit deduction, not on arbitrary saves).
 UserSchema.pre<IUser>('save', function (next) {
   if (this.lastUsageDate) {
     const now = new Date();
     const last = new Date(this.lastUsageDate);
-    if (now.getMonth() !== last.getMonth() || now.getFullYear() !== last.getFullYear()) {
+    if (
+      now.getMonth() !== last.getMonth() ||
+      now.getFullYear() !== last.getFullYear()
+    ) {
       this.currentMonthUsage = 0;
     }
   }
-  this.lastUsageDate = new Date();
   next();
 });
 
@@ -541,13 +547,11 @@ UserSchema.methods.deductWordCredits = async function (
     this.subscriptionWordBalance -= deduct;
     remaining -= deduct;
   }
-
   if (remaining > 0 && topupBalance > 0) {
     const deduct = Math.min(remaining, topupBalance);
     this.topupWordBalance -= deduct;
     remaining -= deduct;
   }
-
   if (remaining > 0 && legacyBalance > 0) {
     const deduct = Math.min(remaining, legacyBalance);
     this.wordCredits -= deduct;
@@ -556,6 +560,9 @@ UserSchema.methods.deductWordCredits = async function (
 
   this.totalWordsUsed += wordsUsed;
   this.currentMonthUsage += wordsUsed;
+
+  // Update lastUsageDate here — this is the only place it should be written
+  this.lastUsageDate = new Date();
 
   this.wordUsageHistory.push({
     date: new Date(),
@@ -653,7 +660,7 @@ UserSchema.methods.addCredits = async function (amount: number): Promise<void> {
   await this.save();
 };
 
-// ─── Statics ─────────────────────────────────────────────────────────────────
+// ─── Statics ──────────────────────────────────────────────────────────────────
 
 UserSchema.statics.findByEmail = function (email: string) {
   return this.findOne({ email: email.toLowerCase() });
@@ -669,20 +676,41 @@ UserSchema.statics.findUsersWithWordCredits = function () {
 
 // ─── Virtuals ─────────────────────────────────────────────────────────────────
 
-UserSchema.virtual('displayName').get(function () { return this.name; });
-UserSchema.virtual('isAdmin').get(function () { return ['admin', 'super_admin'].includes(this.role); });
-UserSchema.virtual('hasActiveSubscription').get(function () {
-  if (this.subscriptionStatus === 'free') return true;
-  if (!this.subscriptionExpiry) return false;
-  return this.subscriptionExpiry > new Date();
+UserSchema.virtual('displayName').get(function () {
+  return this.name;
 });
+
+UserSchema.virtual('isAdmin').get(function () {
+  return ['admin', 'super_admin'].includes(this.role);
+});
+
+/**
+ * Returns true only when the user has a paid, non-expired subscription.
+ * Free-tier users return false — free access should be gated separately,
+ * not by treating free as "active subscription".
+ */
+UserSchema.virtual('hasActiveSubscription').get(function () {
+  const plan = this.subscription?.plan || this.subscriptionStatus;
+  if (!plan || plan === 'free') return false;
+  if (this.subscription?.status === 'active') {
+    if (this.subscription.currentPeriodEnd) {
+      return this.subscription.currentPeriodEnd > new Date();
+    }
+    return true;
+  }
+  if (this.subscriptionExpiry) return this.subscriptionExpiry > new Date();
+  return false;
+});
+
 UserSchema.virtual('wordCreditsStatus').get(function () {
   return {
     current: this.wordCredits,
     subscriptionBalance: this.subscriptionWordBalance || 0,
     topupBalance: this.topupWordBalance || 0,
     totalAvailable:
-      (this.subscriptionWordBalance || 0) + (this.topupWordBalance || 0) + (this.wordCredits || 0),
+      (this.subscriptionWordBalance || 0) +
+      (this.topupWordBalance || 0) +
+      (this.wordCredits || 0),
     totalUsed: this.totalWordsUsed,
     monthUsed: this.currentMonthUsage,
     hasCredits: this.hasWordCredits(),

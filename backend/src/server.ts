@@ -28,18 +28,29 @@ const startServer = async () => {
     // Connect to database first
     await connectDB();
 
-    // Seed billing data after DB is ready
-    await seedBillingData();
+    // Seed billing data only when explicitly requested.
+    // Set RUN_SEED_ON_STARTUP=true in .env for first-time setup only.
+    // Never set this in production after initial deployment — it re-runs
+    // on every restart otherwise, which wastes DB operations and can cause
+    // unexpected overwrites.
+    if (process.env.RUN_SEED_ON_STARTUP === 'true') {
+      logger.info('RUN_SEED_ON_STARTUP=true — running billing seed...');
+      await seedBillingData();
+      logger.info('Billing seed complete.');
+    }
 
-    // Initialize cron jobs after database connection
+    // Initialize cron jobs after database is ready.
+    // Must be awaited because initializeCronJobs calls initializePipelineCrons
+    // internally, which does a DB query (PipelineConfig.find()). Without await,
+    // pipeline scheduling failures are silently swallowed on startup.
     try {
-      initializeCronJobs();
+      await initializeCronJobs();
       logger.info('✅ Cron jobs initialized successfully');
       logger.info('   - Scheduled posts check: Every minute');
       logger.info('   - Sitemap crawl: Daily at 2 AM');
     } catch (cronError) {
       logger.error('❌ Failed to initialize cron jobs:', cronError);
-      // Don't exit - server can still run without cron jobs
+      // Don't exit — server can still run without cron jobs
     }
 
     // Start the server
@@ -48,9 +59,9 @@ const startServer = async () => {
     });
 
     // Increased timeouts for content generation
-    server.timeout = 300000;        // 5 minutes
+    server.timeout = 300000;         // 5 minutes
     server.keepAliveTimeout = 300000;
-    server.headersTimeout = 310000; // Slightly higher than keepAliveTimeout
+    server.headersTimeout = 310000;  // Slightly higher than keepAliveTimeout
 
     logger.info('Server timeouts configured: 5 minutes for long-running operations');
 
@@ -62,10 +73,9 @@ const startServer = async () => {
       });
     });
 
-    // Graceful shutdown handlers
+    // Graceful shutdown
     const shutdown = async (signal: string) => {
       logger.info(`Received ${signal}, shutting down gracefully`);
-
       server.close(async () => {
         try {
           await mongoose.disconnect();
@@ -88,5 +98,4 @@ const startServer = async () => {
   }
 };
 
-// Start the application
 startServer();
