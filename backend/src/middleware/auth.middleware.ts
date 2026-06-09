@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import User from '../models/user.model';
+import logger from '../config/logger';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -34,8 +35,11 @@ export const authMiddleware = async (
       token = authHeader.substring(7);
     }
 
-    // 2. ✅ FALLBACK: Check query parameters for EventSource (SSE) requests
-    if (!token && req.query.token) {
+    // 2. FALLBACK: Accept token in query string ONLY for SSE/EventSource requests.
+    // WARNING: Query params are logged by proxies, CDNs, and nginx. Use only for SSE.
+    // Do NOT use this for regular API calls — pass the token in the Authorization header.
+    const isSSE = req.headers.accept?.includes('text/event-stream');
+    if (!token && req.query.token && isSSE) {
       token = req.query.token as string;
     }
 
@@ -102,7 +106,7 @@ export const authMiddleware = async (
 
     next();
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    logger.error('Auth middleware error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error during authentication',
@@ -145,12 +149,12 @@ export const optionalAuthMiddleware = async (
         };
       }
     } catch (error) {
-      console.log('Optional auth failed:', error instanceof Error ? error.message : 'Unknown error');
+      logger.debug('Optional auth (non-critical):', error instanceof Error ? error.message : 'Unknown error');
     }
 
     next();
   } catch (error) {
-    console.error('Optional auth middleware error:', error);
+    logger.error('Optional auth middleware error:', error);
     next();
   }
 };

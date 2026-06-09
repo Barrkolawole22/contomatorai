@@ -289,7 +289,7 @@ class BillingController {
 
       const purchasesArray = user.wordPackagePurchases || [];
       const existingPurchase = purchasesArray.find(
-        (purchase: any) => purchase.stripePaymentIntentId === reference
+        (purchase: any) => purchase.paystackReference === reference
       );
       if (existingPurchase) {
         const updatedUser = await User.findById(userId);
@@ -323,7 +323,7 @@ class BillingController {
           packageName: targetItem.name,
           amountPaid: transactionData.amount,
           currency: transactionData.currency,
-          stripePaymentIntentId: reference,
+          paystackReference: reference,
           status: 'completed',
         });
       } else {
@@ -336,7 +336,7 @@ class BillingController {
           amountPaid: transactionData.amount,
           currency: transactionData.currency,
           purchaseDate: new Date(),
-          stripePaymentIntentId: reference,
+          paystackReference: reference,
           status: 'completed',
         });
         await user.save();
@@ -441,7 +441,7 @@ class BillingController {
 
       const purchasesArray = user.wordPackagePurchases || [];
       const existingPurchase = purchasesArray.find(
-        (purchase: any) => purchase.stripePaymentIntentId === reference
+        (purchase: any) => purchase.paystackReference === reference
       );
       if (existingPurchase) return;
 
@@ -463,7 +463,7 @@ class BillingController {
           packageName: targetItem.name,
           amountPaid: data.amount,
           currency: data.currency,
-          stripePaymentIntentId: reference,
+          paystackReference: reference,
           status: 'completed',
         });
       } else {
@@ -476,7 +476,7 @@ class BillingController {
           amountPaid: data.amount,
           currency: data.currency,
           purchaseDate: new Date(),
-          stripePaymentIntentId: reference,
+          paystackReference: reference,
           status: 'completed',
         });
         await user.save();
@@ -500,7 +500,7 @@ class BillingController {
         const user = await User.findById(userId);
         if (user && user.wordPackagePurchases) {
           const purchase = user.wordPackagePurchases.find(
-            p => p.stripePaymentIntentId === reference
+            p => p.paystackReference === reference
           );
           if (purchase) {
             purchase.status = 'failed';

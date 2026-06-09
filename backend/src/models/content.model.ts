@@ -347,7 +347,7 @@ const ContentSchema: Schema<IContent> = new Schema<IContent>(
     reviewStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected', 'needs_revision'],
-      default: 'pending',
+      default: undefined, // intentionally undefined — only set when review workflow is active
       index: true,
     },
     reviewNotes: {
@@ -414,9 +414,9 @@ ContentSchema.index({ keyword: 'text', title: 'text' });
 ContentSchema.index({ reviewStatus: 1, createdAt: -1 });
 ContentSchema.index({ qualityScore: -1 });
 ContentSchema.index({ generatedBy: 1, createdAt: -1 });
-ContentSchema.index({ status: 1, scheduledPublishDate: 1 });
+ContentSchema.index({ status: 1, scheduledPublishDate: 1 }); // cron scheduler index
 ContentSchema.index({ scheduledPublishDate: 1 });
-ContentSchema.index({ generateAt: 1, status: 1 }); // ✅ NEW index for the cron job
+ContentSchema.index({ generateAt: 1, status: 1 }); // cron job generation offset index
 
 ContentSchema.pre<IContent>('save', function (next) {
   if (this.isModified('content') && this.content) {

@@ -46,7 +46,7 @@ const envSchema = z.object({
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
 
   SALT_WORK_FACTOR: z.coerce.number().min(8).max(15).default(12),
-  CORS_ORIGIN: z.string().default('*'),
+  CORS_ORIGIN: z.string().default('http://localhost:3000'),
   SESSION_SECRET: z.string().min(32).optional(),
 
   EMAIL_FROM: z.string().email('Invalid email address').optional(),

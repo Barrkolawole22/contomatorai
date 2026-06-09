@@ -23,8 +23,14 @@ export class ContentService {
       const targetWordCount = p.wordCount || 1500;
       const estimatedCredits = aiService.calculateCreditsNeeded(targetWordCount, selectedModel);
 
+      // FIX H1: validate against total across all three credit buckets
+      const totalAvailableCredits =
+        ((user as any).subscriptionWordBalance || 0) +
+        ((user as any).topupWordBalance || 0) +
+        ((user as any).wordCredits || 0);
+
       const creditValidation = aiService.validateCredits(
-        (user as any).wordCredits || (user as any).credits || 0,
+        totalAvailableCredits,
         targetWordCount,
         selectedModel
       );
@@ -34,7 +40,7 @@ export class ContentService {
           `Insufficient credits. You need ${estimatedCredits.toLocaleString()} credits ` +
           `for ${targetWordCount.toLocaleString()} words with ${modelConfig.label} ` +
           `(${modelConfig.creditMultiplier}x multiplier) but only have ` +
-          `${((user as any).wordCredits || (user as any).credits || 0).toLocaleString()} credits available.`
+          `${totalAvailableCredits.toLocaleString()} credits available.`
         );
       }
 
@@ -114,8 +120,12 @@ export class ContentService {
       const actualCreditsUsed = generatedContent.creditsUsed ||
         aiService.calculateCreditsNeeded(generatedContent.wordCount, selectedModel);
 
-      const userCredits = (user as any).wordCredits || (user as any).credits || 0;
-      if (userCredits < actualCreditsUsed) {
+      // FIX H2: re-check total across all three buckets before deduction
+      const totalAfterGeneration =
+        ((user as any).subscriptionWordBalance || 0) +
+        ((user as any).topupWordBalance || 0) +
+        ((user as any).wordCredits || 0);
+      if (totalAfterGeneration < actualCreditsUsed) {
         await Content.findByIdAndDelete(content._id);
         throw new Error(`Insufficient credits for generated content.`);
       }

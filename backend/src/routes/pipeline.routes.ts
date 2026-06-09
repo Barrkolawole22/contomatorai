@@ -154,6 +154,12 @@ router.delete('/:id', async (req: AuthenticatedRequest, res: Response) => {
 // POST /api/pipelines/:id/trigger
 router.post('/:id/trigger', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Ownership check: verify the pipeline belongs to the requesting user
+    const config = await PipelineConfig.findOne({ _id: req.params.id, userId: req.user!.id });
+    if (!config) {
+      res.status(404).json({ success: false, message: 'Pipeline not found' });
+      return;
+    }
     await autonomousPipeline.runPipeline(req.params.id);
     res.json({ success: true, message: 'Pipeline run started' });
   } catch (error: any) {
@@ -164,6 +170,12 @@ router.post('/:id/trigger', async (req: AuthenticatedRequest, res: Response) => 
 // GET /api/pipelines/:id/runs
 router.get('/:id/runs', async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Ownership check: verify the pipeline belongs to the requesting user
+    const config = await PipelineConfig.findOne({ _id: req.params.id, userId: req.user!.id });
+    if (!config) {
+      res.status(404).json({ success: false, message: 'Pipeline not found' });
+      return;
+    }
     const runs = await PipelineRun.find({ pipelineConfigId: req.params.id }).sort('-runAt');
     res.json({ success: true, data: runs });
   } catch (error: any) {

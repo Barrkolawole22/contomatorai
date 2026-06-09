@@ -44,7 +44,7 @@ export const adminMiddleware = (
     res.status(500).json({
       success: false,
       message: 'Authorization check failed',
-      error: error.message,
+      ...(process.env.NODE_ENV === 'development' && { error: error.message }),
     });
   }
 };

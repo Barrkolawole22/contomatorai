@@ -1,5 +1,5 @@
 // backend/src/routes/billing.routes.ts
-console.log('📦 Loading billing routes...');
+
 
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
@@ -105,6 +105,5 @@ router.patch(
   billingController.updateCurrency.bind(billingController)
 );
 
-console.log('✅ Billing routes loaded successfully');
 
 export default router;

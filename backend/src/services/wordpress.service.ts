@@ -53,17 +53,13 @@ class SimplifiedWordPressService {
   
   async simpleTest(apiUrl: string, username: string, applicationPassword: string): Promise<WordPressConnectionResult> {
     try {
-      console.log('=== SIMPLE WORDPRESS TEST ===');
-      console.log('Testing URL:', apiUrl);
-      console.log('Username:', username);
-      console.log('Password provided:', !!applicationPassword);
-      console.log('Password length:', applicationPassword?.length || 0);
+      logger.info('WordPress connection test started', { apiUrl, username });
       
       const authString = Buffer.from(`${username}:${applicationPassword}`).toString('base64');
-      console.log('Auth string created, length:', authString.length);
+
       
       const testUrl = `${apiUrl}/users/me`;
-      console.log('Calling WordPress API:', testUrl);
+      logger.debug(`Calling WordPress API: ${testUrl}`);
       
       const response = await axios.get(testUrl, {
         headers: {
@@ -78,19 +74,16 @@ class SimplifiedWordPressService {
         })
       });
       
-      console.log('SUCCESS! Response status:', response.status);
-      console.log('User ID:', response.data.id);
-      console.log('User name:', response.data.name);
-      console.log('User roles:', response.data.roles);
+      logger.info('WordPress connection successful', { status: response.status, userId: response.data.id, userName: response.data.name });
       
       let siteInfo = null;
       try {
         const siteUrl = apiUrl.replace('/wp-json/wp/v2', '');
         const siteResponse = await axios.get(`${siteUrl}/wp-json/`, { timeout: 5000 });
         siteInfo = siteResponse.data;
-        console.log('Site info retrieved successfully');
+        logger.debug('WordPress site info retrieved');
       } catch (siteError) {
-        console.log('Could not fetch site info, continuing without it');
+        logger.debug('Could not fetch site info, continuing without it');
       }
 
       return {
@@ -111,14 +104,12 @@ class SimplifiedWordPressService {
       };
       
     } catch (error: any) {
-      console.error('WORDPRESS CONNECTION FAILED!');
-      console.error('Error status:', error.response?.status);
-      console.error('Error code:', error.code);
-      console.error('Error message:', error.message);
-      
-      if (error.response?.data) {
-        console.error('WordPress error data:', JSON.stringify(error.response.data, null, 2));
-      }
+      logger.error('WordPress connection failed', {
+        status: error.response?.status,
+        code: error.code,
+        message: error.message,
+        data: error.response?.data,
+      });
       
       let errorMessage = 'Connection test failed';
       

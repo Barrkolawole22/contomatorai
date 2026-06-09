@@ -8,9 +8,9 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import { env, isDevelopment } from './config/env';
-import logger from './config/logger';import scraperRoutes from './routes/scraper.routes';
+import logger from './config/logger';
+import scraperRoutes from './routes/scraper.routes';
 import sitesRoutes from './routes/sites.routes';
-
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -38,16 +38,15 @@ import adminSettingsRoutes from './routes/admin-settings.routes';
 // Import knowledgebase routes
 import knowledgebaseRoutes from './routes/knowledgebase.routes';
 
-// Import pipeline routes (ADDED HERE)
+// Import pipeline routes
 import pipelineRoutes from './routes/pipeline.routes';
 
-// === ADD FOR OAUTH ===
+// OAuth
 import passport from 'passport';
 import session from 'express-session';
 import './config/passport.config';
-// ============================
 
-import { Express } from "express";
+import { Express } from 'express';
 const app: Express = express();
 
 // Trust proxy for accurate IP addresses
@@ -71,7 +70,6 @@ const ensureUploadDirs = () => {
   });
 };
 
-// Initialize upload directories
 ensureUploadDirs();
 
 // ===== SECURITY MIDDLEWARE =====
@@ -82,7 +80,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:", "http:"],
+      imgSrc: ["'self'", 'data:', 'https:', 'http:'],
     },
   },
 }));
@@ -106,11 +104,21 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'), false);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 
-app.options('*', cors());
+// OPTIONS pre-flight with full CORS config (not open cors())
+app.options('*', cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    const allowedOrigins = env.CORS_ORIGIN.split(',');
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isDevelopment() && origin.includes('localhost')) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'), false);
+  },
+  credentials: true,
+}));
 
 // ===== STATIC FILE SERVING FOR UPLOADS =====
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
@@ -136,10 +144,12 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
       default:
         break;
     }
-  }
+  },
 }));
 
 // ===== RATE LIMITING =====
+// FIX: When mounted as app.use('/api', limiter), req.path is relative to /api.
+// Skip paths must NOT include the /api prefix.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -150,26 +160,29 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    return req.path === '/api/health' ||
-           req.path.startsWith('/uploads') ||
-           req.path === '/api/billing/webhook';
+    return (
+      req.path === '/health' ||
+      req.path.startsWith('/uploads') ||
+      req.path === '/billing/webhook'
+    );
   },
 });
 
 app.use('/api', limiter);
 
 // ===== PAYSTACK WEBHOOK RAW BODY MIDDLEWARE =====
+// Must be BEFORE express.json() so Paystack signature verification gets the raw body.
 app.use('/api/billing/webhook', express.raw({
   type: 'application/json',
-  limit: '1mb'
+  limit: '1mb',
 }));
 
 // ===== BODY PARSING MIDDLEWARE =====
 app.use(express.json({
   limit: '10mb',
-  verify: (req, res, buffer) => {
+  verify: (req, _res, buffer) => {
     (req as any).rawBody = buffer;
-  }
+  },
 }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
@@ -187,24 +200,27 @@ if (isDevelopment()) {
   }));
 }
 
-app.use('/api/scraper', scraperRoutes);
-
-// === SESSION CONFIGURATION (MUST BE BEFORE PASSPORT) ===
+// ===== SESSION (MUST BE BEFORE PASSPORT) =====
 if (!env.SESSION_SECRET) {
-  logger.warn('SESSION_SECRET is not defined in .env. Using a default (insecure) secret. THIS IS NOT SAFE FOR PRODUCTION.');
+  if (env.NODE_ENV === 'production') {
+    logger.error('FATAL: SESSION_SECRET is not set. Cannot start in production without a secure session secret.');
+    process.exit(1);
+  } else {
+    logger.warn('SESSION_SECRET is not defined. Using insecure default — NOT SAFE FOR PRODUCTION.');
+  }
 }
 app.use(session({
-  secret: env.SESSION_SECRET || 'please_set_a_secure_session_secret_in_env',
+  secret: env.SESSION_SECRET || 'dev_only_insecure_session_secret_do_not_use_in_prod',
   resave: false,
   saveUninitialized: false,
   cookie: {
     secure: env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24
-  }
+    maxAge: 1000 * 60 * 60 * 24,
+  },
 }));
 
-// === INITIALIZE PASSPORT ===
+// ===== PASSPORT =====
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -232,60 +248,42 @@ app.get('/api/health', (req, res) => {
     },
     uploads: {
       directory: path.join(__dirname, '../uploads'),
-      accessible: fs.existsSync(path.join(__dirname, '../uploads'))
-    }
+      accessible: fs.existsSync(path.join(__dirname, '../uploads')),
+    },
   });
 });
 
-// ===== API ROUTES - ORGANIZED ORDER =====
+// ===== API ROUTES =====
 // User-facing routes
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/content', contentRoutes);
-app.use('/api/sites', wordpressRoutes);
+// FIX: /api/sites maps to sitesRoutes only. wordpressRoutes gets /api/wordpress only.
+// Previously /api/sites was registered twice (wordpressRoutes then sitesRoutes), causing sitesRoutes to be partially shadowed.
 app.use('/api/wordpress', wordpressRoutes);
+app.use('/api/sites', sitesRoutes);
 app.use('/api/keywords', keywordRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/billing', billingRoutes);
-app.use('/api/sites', sitesRoutes);
 app.use('/api/sitemap', sitemapRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/bulk-content', bulkContentRoutes);
 app.use('/api/knowledgebase', knowledgebaseRoutes);
-app.use('/api/pipelines', pipelineRoutes); // ADDED HERE
-
-// Notifications routes
+app.use('/api/pipelines', pipelineRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// Admin routes - MUST come after user routes to avoid conflicts
+// FIX: Scraper routes moved to AFTER session and passport initialization.
+// Previously mounted before session setup, which broke any auth-protected scraper route.
+app.use('/api/scraper', scraperRoutes);
+
+// Admin routes — must come after user routes to avoid conflicts
 app.use('/api/admin/wordpress', adminWordpressRoutes);
 app.use('/api/admin/system', adminSystemRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Log route registration
-logger.info('Routes registered:');
-logger.info('  - /api/auth');
-logger.info('  - /api/profile');
-logger.info('  - /api/content');
-logger.info('  - /api/sites');
-logger.info('  - /api/wordpress');
-logger.info('  - /api/keywords');
-logger.info('  - /api/settings');
-logger.info('  - /api/billing');
-logger.info('  - /api/sitemap');
-logger.info('  - /api/scheduler');
-logger.info('  - /api/bulk-content');
-logger.info('  - /api/knowledgebase');
-logger.info('  - /api/pipelines'); // ADDED HERE
-logger.info('  - /api/notifications');
-logger.info('  - /api/admin/wordpress');
-logger.info('  - /api/admin/system');
-logger.info('  - /api/admin/settings');
-logger.info('  - /api/admin');
-
 // ===== ROOT ROUTE =====
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({
     message: 'Content Automation SaaS API',
     version: '1.0.0',
@@ -305,16 +303,17 @@ app.get('/', (req, res) => {
       scheduler: '/api/scheduler',
       bulkContent: '/api/bulk-content',
       knowledgebase: '/api/knowledgebase',
-      pipelines: '/api/pipelines', // ADDED HERE
+      pipelines: '/api/pipelines',
       notifications: '/api/notifications',
       health: '/api/health',
+      scraper: '/api/scraper',
     },
     adminEndpoints: {
       wordpress: '/api/admin/wordpress',
       system: '/api/admin/system',
       settings: '/api/admin/settings',
       users: '/api/admin/users',
-      dashboard: '/api/admin/dashboard'
+      dashboard: '/api/admin/dashboard',
     },
     billing: {
       packages: '/api/billing/packages',
@@ -322,50 +321,8 @@ app.get('/', (req, res) => {
       initializeTransaction: '/api/billing/initialize-transaction',
       verifyTransaction: '/api/billing/verify-transaction',
       analytics: '/api/billing/usage-analytics',
-      webhook: '/api/billing/webhook'
+      webhook: '/api/billing/webhook',
     },
-    bulkContent: {
-      generateAndSchedule: '/api/bulk-content/generate-and-schedule',
-      generate: '/api/bulk-content/generate',
-      estimate: '/api/bulk-content/estimate',
-      progress: '/api/bulk-content/progress/:operationId',
-      uploadCSV: '/api/bulk-content/upload-csv',
-      executeCSV: '/api/bulk-content/execute-csv',
-    },
-    knowledgebase: {
-      upload: '/api/knowledgebase/upload',
-      list: '/api/knowledgebase',
-      get: '/api/knowledgebase/:id',
-      delete: '/api/knowledgebase/:id',
-      search: '/api/knowledgebase/search',
-    },
-    notifications: {
-      list: '/api/notifications',
-      unreadCount: '/api/notifications/unread-count',
-      markAsRead: '/api/notifications/:id/read',
-      markAllRead: '/api/notifications/mark-all-read',
-      delete: '/api/notifications/:id'
-    },
-    sitemap: {
-      crawl: '/api/sitemap/crawl/:siteId',
-      stats: '/api/sitemap/stats/:siteId',
-      findLinks: '/api/sitemap/find-links',
-      clear: '/api/sitemap/:siteId'
-    },
-    scheduler: {
-      schedule: '/api/scheduler/schedule',
-      update: '/api/scheduler/update/:contentId',
-      cancel: '/api/scheduler/:contentId',
-      scheduled: '/api/scheduler/scheduled',
-      calendar: '/api/scheduler/calendar',
-      stats: '/api/scheduler/stats',
-      bulkSchedule: '/api/scheduler/bulk-schedule'
-    },
-    uploads: {
-      endpoint: '/uploads',
-      avatars: '/uploads/avatars',
-      content: '/uploads/content'
-    }
   });
 });
 
@@ -375,31 +332,11 @@ app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     message: `Route ${req.method} ${req.originalUrl} not found`,
-    availableEndpoints: [
-      '/api/auth',
-      '/api/profile',
-      '/api/content',
-      '/api/sites',
-      '/api/wordpress',
-      '/api/keywords',
-      '/api/settings',
-      '/api/admin',
-      '/api/admin/wordpress',
-      '/api/admin/system',
-      '/api/admin/settings',
-      '/api/billing',
-      '/api/sitemap',
-      '/api/scheduler',
-      '/api/bulk-content',
-      '/api/knowledgebase',
-      '/api/pipelines', // ADDED HERE
-      '/api/notifications'
-    ]
   });
 });
 
 // ===== ERROR HANDLING MIDDLEWARE =====
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction): void => {
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction): void => {
   logger.error('Unhandled error:', {
     error: err.message,
     stack: err.stack,
@@ -418,50 +355,32 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   }
 
   if (err.name === 'CastError') {
-    res.status(400).json({
-      success: false,
-      message: 'Invalid ID format',
-    });
+    res.status(400).json({ success: false, message: 'Invalid ID format' });
     return;
   }
 
   if (err.code === 11000) {
-    res.status(409).json({
-      success: false,
-      message: 'Duplicate entry',
-    });
+    res.status(409).json({ success: false, message: 'Duplicate entry' });
     return;
   }
 
   if (err.message === 'Not allowed by CORS') {
-    res.status(403).json({
-      success: false,
-      message: 'CORS policy violation',
-    });
+    res.status(403).json({ success: false, message: 'CORS policy violation' });
     return;
   }
 
   if (err.code === 'LIMIT_FILE_SIZE') {
-    res.status(400).json({
-      success: false,
-      message: 'File too large. Maximum size is 10MB.',
-    });
+    res.status(400).json({ success: false, message: 'File too large. Maximum size is 10MB.' });
     return;
   }
 
   if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-    res.status(400).json({
-      success: false,
-      message: 'Unexpected file field.',
-    });
+    res.status(400).json({ success: false, message: 'Unexpected file field.' });
     return;
   }
 
   if (err.type === 'PaystackSignatureVerificationError') {
-    res.status(400).json({
-      success: false,
-      message: 'Invalid webhook signature',
-    });
+    res.status(400).json({ success: false, message: 'Invalid webhook signature' });
     return;
   }
 
@@ -470,7 +389,6 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     message: isDevelopment() ? err.message : 'Internal server error',
     ...(isDevelopment() && { stack: err.stack }),
   });
-  return;
 });
 
 export default app;

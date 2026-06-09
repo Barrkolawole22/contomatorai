@@ -25,7 +25,7 @@ interface WordPackagePurchase {
   amountPaid: number;
   currency: string;
   purchaseDate: Date;
-  stripePaymentIntentId?: string;
+  paystackReference?: string;
   status: 'pending' | 'completed' | 'failed' | 'refunded';
 }
 
@@ -91,7 +91,6 @@ export interface IUser extends Document {
 
   byoApiEnabled?: boolean;
   apiKeys?: {
-    // openai intentionally removed — not part of the stack
     anthropic?: string;
     gemini?: string;
   };
@@ -134,8 +133,6 @@ export interface IUser extends Document {
   subscription?: {
     plan: PlanName;
     status: 'active' | 'inactive' | 'cancelled' | 'past_due';
-    stripeCustomerId?: string;
-    stripeSubscriptionId?: string;
     currentPeriodStart?: Date;
     currentPeriodEnd?: Date;
     expiresAt?: Date;
@@ -186,7 +183,7 @@ const WordPackagePurchaseSchema = new Schema(
     amountPaid: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'NGN' },
     purchaseDate: { type: Date, default: Date.now },
-    stripePaymentIntentId: { type: String },
+    paystackReference: { type: String },
     status: {
       type: String,
       enum: ['pending', 'completed', 'failed', 'refunded'],
@@ -237,8 +234,6 @@ const SubscriptionSchema = new Schema(
       enum: ['active', 'inactive', 'cancelled', 'past_due'],
       default: 'inactive',
     },
-    stripeCustomerId: { type: String },
-    stripeSubscriptionId: { type: String },
     currentPeriodStart: { type: Date },
     currentPeriodEnd: { type: Date },
     expiresAt: { type: Date },
@@ -287,7 +282,7 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       default: 'active',
     },
 
-    // Default of 5000 here is a fallback only. Registration handlers must read
+    // Default of 5000 is a fallback only. Registration handlers should read
     // from env.DEFAULT_FREE_WORD_CREDITS so the value stays in one place.
     wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'], max: 10_000_000 },
     totalWordsUsed: { type: Number, default: 0, min: 0 },
@@ -326,7 +321,6 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
 
     lastLogin: { type: Date, default: undefined },
     loginCount: { type: Number, default: 0, min: 0 },
-    // Tracks the last time word credits were actually consumed, not last save.
     lastUsageDate: { type: Date, default: undefined },
 
     subscriptionStatus: { type: String, enum: allowedPlans, default: 'free' },
@@ -335,7 +329,6 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
 
     byoApiEnabled: { type: Boolean, default: false },
     apiKeys: {
-      // openai removed — not part of the active stack
       anthropic: { type: String, select: false },
       gemini: { type: String, select: false },
     },
@@ -560,8 +553,6 @@ UserSchema.methods.deductWordCredits = async function (
 
   this.totalWordsUsed += wordsUsed;
   this.currentMonthUsage += wordsUsed;
-
-  // Update lastUsageDate here — this is the only place it should be written
   this.lastUsageDate = new Date();
 
   this.wordUsageHistory.push({
@@ -579,6 +570,16 @@ UserSchema.methods.deductWordCredits = async function (
   return true;
 };
 
+/**
+ * FIX: Previously this method always incremented `wordCredits` regardless of
+ * the credit type, causing double-counting. A subscription purchase would add
+ * to both `subscriptionWordBalance` AND `wordCredits`, inflating the total.
+ *
+ * Now: each credit type increments only its own bucket.
+ * - type === 'subscription' → subscriptionWordBalance only
+ * - type === 'topup'        → topupWordBalance only
+ * - no type                 → legacy wordCredits only
+ */
 UserSchema.methods.addWordCredits = async function (
   wordsToAdd: number,
   packageInfo?: any
@@ -589,9 +590,10 @@ UserSchema.methods.addWordCredits = async function (
     this.subscriptionWordBalance = (this.subscriptionWordBalance || 0) + wordsToAdd;
   } else if (type === 'topup') {
     this.topupWordBalance = (this.topupWordBalance || 0) + wordsToAdd;
+  } else {
+    // Legacy / no-type path: add to wordCredits bucket only
+    this.wordCredits = (this.wordCredits || 0) + wordsToAdd;
   }
-
-  this.wordCredits = (this.wordCredits || 0) + wordsToAdd;
 
   if (packageInfo) {
     this.wordPackagePurchases.push({
@@ -601,7 +603,7 @@ UserSchema.methods.addWordCredits = async function (
       amountPaid: packageInfo.amountPaid,
       currency: packageInfo.currency || 'NGN',
       purchaseDate: new Date(),
-      stripePaymentIntentId: packageInfo.stripePaymentIntentId,
+      paystackReference: packageInfo.paystackReference,
       status: packageInfo.status || 'completed',
     });
   }
@@ -686,8 +688,7 @@ UserSchema.virtual('isAdmin').get(function () {
 
 /**
  * Returns true only when the user has a paid, non-expired subscription.
- * Free-tier users return false — free access should be gated separately,
- * not by treating free as "active subscription".
+ * Free-tier users return false.
  */
 UserSchema.virtual('hasActiveSubscription').get(function () {
   const plan = this.subscription?.plan || this.subscriptionStatus;
@@ -703,19 +704,20 @@ UserSchema.virtual('hasActiveSubscription').get(function () {
 });
 
 UserSchema.virtual('wordCreditsStatus').get(function () {
+  const subscriptionBalance = this.subscriptionWordBalance || 0;
+  const topupBalance = this.topupWordBalance || 0;
+  const legacyBalance = this.wordCredits || 0;
+  const totalAvailable = subscriptionBalance + topupBalance + legacyBalance;
+
   return {
-    current: this.wordCredits,
-    subscriptionBalance: this.subscriptionWordBalance || 0,
-    topupBalance: this.topupWordBalance || 0,
-    totalAvailable:
-      (this.subscriptionWordBalance || 0) +
-      (this.topupWordBalance || 0) +
-      (this.wordCredits || 0),
+    current: legacyBalance,
+    subscriptionBalance,
+    topupBalance,
+    totalAvailable,
     totalUsed: this.totalWordsUsed,
     monthUsed: this.currentMonthUsage,
-    hasCredits: this.hasWordCredits(),
-    needsRefill:
-      (this.subscriptionWordBalance || 0) + (this.topupWordBalance || 0) < 1000,
+    hasCredits: totalAvailable > 0,
+    needsRefill: subscriptionBalance + topupBalance < 1000,
   };
 });
 

@@ -100,6 +100,8 @@ export const deductWordCredits = async (req: AuthenticatedRequest, res: Response
       success: true,
       message: 'Word credits deducted successfully',
       wordCredits: user.wordCredits,
+      subscriptionWordBalance: user.subscriptionWordBalance,
+      topupWordBalance: user.topupWordBalance,
       totalWordsUsed: user.totalWordsUsed,
       currentMonthUsage: user.currentMonthUsage,
       deductedWords: wordCount,
@@ -353,7 +355,9 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
     return res.status(500).json({
       success: false,
       message: 'Login failed',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      ...(process.env.NODE_ENV === 'development' && {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }),
     });
   }
 };

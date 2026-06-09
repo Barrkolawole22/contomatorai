@@ -69,12 +69,12 @@ export class GeminiService {
   constructor() {
     this.apiKey = env.GEMINI_API_KEY;
 
-    if (!this.apiKey) {
-      throw new Error('GEMINI_API_KEY is required');
+    if (this.apiKey) {
+      this.genAI = new GoogleGenerativeAI(this.apiKey);
+      logger.info('Gemini service initialized (Flash & Pro)');
+    } else {
+      logger.warn('GEMINI_API_KEY is not set — Gemini service is disabled. Set the key to enable AI generation.');
     }
-
-    this.genAI = new GoogleGenerativeAI(this.apiKey);
-    logger.info('Gemini service initialized (Flash & Pro)');
   }
 
   async generateBlogPost(
