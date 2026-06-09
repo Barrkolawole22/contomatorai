@@ -128,6 +128,9 @@ export interface IUser extends Document {
     location?: string;
     lastPasswordChange?: Date;
     twoFactorEnabled?: boolean;
+    analyticsTracking?: boolean;
+    dataSharing?: boolean;
+    cookiePreferences?: boolean;
   };
 
   subscription?: {
@@ -282,8 +285,6 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       default: 'active',
     },
 
-    // Default of 5000 is a fallback only. Registration handlers should read
-    // from env.DEFAULT_FREE_WORD_CREDITS so the value stays in one place.
     wordCredits: { type: Number, default: 5000, min: [0, 'Word credits cannot be negative'], max: 10_000_000 },
     totalWordsUsed: { type: Number, default: 0, min: 0 },
     currentMonthUsage: { type: Number, default: 0, min: 0 },
@@ -387,6 +388,9 @@ const UserSchema: Schema<IUser> = new Schema<IUser>(
       bio: { type: String, default: '' },
       company: { type: String, default: '' },
       location: { type: String, default: '' },
+      analyticsTracking: { type: Boolean, default: true },
+      dataSharing: { type: Boolean, default: false },
+      cookiePreferences: { type: Boolean, default: true },
     },
   },
   {
@@ -434,8 +438,6 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
-// Monthly usage reset: only runs if lastUsageDate was explicitly set
-// (i.e. during actual credit deduction, not on arbitrary saves).
 UserSchema.pre<IUser>('save', function (next) {
   if (this.lastUsageDate) {
     const now = new Date();
@@ -570,16 +572,6 @@ UserSchema.methods.deductWordCredits = async function (
   return true;
 };
 
-/**
- * FIX: Previously this method always incremented `wordCredits` regardless of
- * the credit type, causing double-counting. A subscription purchase would add
- * to both `subscriptionWordBalance` AND `wordCredits`, inflating the total.
- *
- * Now: each credit type increments only its own bucket.
- * - type === 'subscription' → subscriptionWordBalance only
- * - type === 'topup'        → topupWordBalance only
- * - no type                 → legacy wordCredits only
- */
 UserSchema.methods.addWordCredits = async function (
   wordsToAdd: number,
   packageInfo?: any
@@ -591,7 +583,6 @@ UserSchema.methods.addWordCredits = async function (
   } else if (type === 'topup') {
     this.topupWordBalance = (this.topupWordBalance || 0) + wordsToAdd;
   } else {
-    // Legacy / no-type path: add to wordCredits bucket only
     this.wordCredits = (this.wordCredits || 0) + wordsToAdd;
   }
 
@@ -686,10 +677,6 @@ UserSchema.virtual('isAdmin').get(function () {
   return ['admin', 'super_admin'].includes(this.role);
 });
 
-/**
- * Returns true only when the user has a paid, non-expired subscription.
- * Free-tier users return false.
- */
 UserSchema.virtual('hasActiveSubscription').get(function () {
   const plan = this.subscription?.plan || this.subscriptionStatus;
   if (!plan || plan === 'free') return false;
