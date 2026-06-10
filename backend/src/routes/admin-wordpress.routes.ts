@@ -1,23 +1,13 @@
-// backend/src/routes/admin-wordpress.routes.ts - FIXED
+// backend/src/routes/admin-wordpress.routes.ts
 import express from 'express';
 import adminWordpressController from '../controllers/admin-wordpress.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { adminMiddleware } from '../middleware/admin.middleware';
 
 const router = express.Router();
 
-// Authentication middleware
 router.use(authMiddleware);
-
-// Inline admin check middleware (until you create proper adminMiddleware)
-router.use((req: any, res: any, next: any) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'Admin access required'
-    });
-  }
-  next();
-});
+router.use(adminMiddleware);
 
 // WordPress admin endpoints
 router.get('/', adminWordpressController.getWordPressOverview);
