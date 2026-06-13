@@ -58,6 +58,9 @@ const envSchema = z.object({
   EMAIL_PASS: z.string().optional(),
   EMAIL_SECURE: z.coerce.boolean().default(true),
 
+  // Support inbox — tickets are sent here. Falls back to EMAIL_FROM if not set.
+  SUPPORT_EMAIL: z.string().email('Invalid support email').optional(),
+
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url('Invalid Google callback URL').optional(),
@@ -185,6 +188,7 @@ if (isDevelopment()) {
   console.log(`🤗 Hugging Face API: ${env.HUGGINGFACE_API_KEY ? 'Configured ✓' : 'Not configured'}`);
   console.log(`💳 Paystack: ${env.PAYSTACK_SECRET_KEY ? 'Configured ✓' : 'Not configured'}`);
   console.log(`👨‍💼 Admin Panel: ${env.ADMIN_PANEL_ENABLED ? 'Enabled' : 'Disabled'}`);
+  console.log(`📧 Support Email: ${env.SUPPORT_EMAIL || env.EMAIL_FROM || 'Not configured'}`);
 }
 
 export default env;

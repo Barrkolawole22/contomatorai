@@ -1,6 +1,7 @@
 // backend/src/services/email.service.ts
 import { env } from '../config/env';
 import logger from '../config/logger';
+import { ITicket } from '../models/ticket.model';
 
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
@@ -201,7 +202,6 @@ export const sendPasswordChangedEmail = async (to: string, name: string) => {
   await sendEmail(to, 'Your ContomatorAI password has been changed', baseTemplate(content));
 };
 
-// ✅ NEW: Notify user when an article is published
 export const sendPostPublishedEmail = async (to: string, name: string, postTitle: string, postUrl: string, siteName: string) => {
   const content = `
     <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">Your Article is Live! 🚀</h2>
@@ -215,13 +215,96 @@ export const sendPostPublishedEmail = async (to: string, name: string, postTitle
   await sendEmail(to, `Success: Your article is live on ${siteName}!`, baseTemplate(content));
 };
 
+// ─── Support ticket emails ────────────────────────────────────────────────────
+
+export const sendSupportTicketNotification = async (ticket: ITicket) => {
+  const supportEmail = env.SUPPORT_EMAIL || env.EMAIL_FROM;
+  if (!supportEmail) {
+    logger.warn('SUPPORT_EMAIL and EMAIL_FROM are both undefined. Ticket notification skipped.');
+    return;
+  }
+
+  const categoryLabel =
+    ticket.category.charAt(0).toUpperCase() + ticket.category.slice(1);
+
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">New Support Ticket</h2>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;background-color:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Ticket Number</span><br/>
+        <span style="color:#1e293b;font-size:15px;font-weight:700;">${ticket.ticketNumber}</span>
+      </td></tr>
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">From</span><br/>
+        <span style="color:#1e293b;font-size:15px;">${ticket.name} &lt;${ticket.email}&gt;</span>
+      </td></tr>
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Category</span><br/>
+        <span style="color:#1e293b;font-size:15px;">${categoryLabel}</span>
+      </td></tr>
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Subject</span><br/>
+        <span style="color:#1e293b;font-size:15px;">${ticket.subject}</span>
+      </td></tr>
+      <tr><td style="padding:12px 16px;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Message</span><br/>
+        <span style="color:#1e293b;font-size:15px;line-height:1.6;white-space:pre-wrap;">${ticket.message}</span>
+      </td></tr>
+    </table>
+    <p style="margin:16px 0 0;color:#64748b;font-size:13px;">
+      Submitted: ${new Date(ticket.createdAt).toUTCString()}
+    </p>
+  `;
+
+  await sendEmail(
+    supportEmail,
+    `[${ticket.ticketNumber}] New Support Ticket: ${ticket.subject}`,
+    baseTemplate(content)
+  );
+};
+
+export const sendTicketConfirmationEmail = async (
+  to: string,
+  name: string,
+  ticketNumber: string,
+  subject: string
+) => {
+  const content = `
+    <h2 style="margin:0 0 8px;color:#1e293b;font-size:22px;font-weight:700;">We received your message</h2>
+    <p style="margin:0 0 16px;color:#64748b;font-size:15px;line-height:1.6;">
+      Hi ${name}, thanks for reaching out. Your support ticket has been created and our team will get back to you within 2 business hours.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;background-color:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+      <tr><td style="padding:12px 16px;border-bottom:1px solid #e2e8f0;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Ticket Number</span><br/>
+        <span style="color:#1e293b;font-size:16px;font-weight:700;">${ticketNumber}</span>
+      </td></tr>
+      <tr><td style="padding:12px 16px;">
+        <span style="color:#64748b;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Subject</span><br/>
+        <span style="color:#1e293b;font-size:15px;">${subject}</span>
+      </td></tr>
+    </table>
+    <p style="margin:16px 0 0;color:#64748b;font-size:14px;">
+      Please keep your ticket number handy when following up. You can also reply directly to this email.
+    </p>
+  `;
+
+  await sendEmail(
+    to,
+    `[${ticketNumber}] We received your support request`,
+    baseTemplate(content)
+  );
+};
+
 const emailService = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendWelcomeEmail,
   sendPasswordChangedEmail,
-  sendPostPublishedEmail, // ✅ Exported here
+  sendPostPublishedEmail,
+  sendSupportTicketNotification,
+  sendTicketConfirmationEmail,
 };
 
 export default emailService;

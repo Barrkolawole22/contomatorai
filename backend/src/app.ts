@@ -41,6 +41,9 @@ import knowledgebaseRoutes from './routes/knowledgebase.routes';
 // Import pipeline routes
 import pipelineRoutes from './routes/pipeline.routes';
 
+// Import support routes
+import supportRoutes from './routes/support.routes';
+
 // OAuth
 import passport from 'passport';
 import session from 'express-session';
@@ -148,8 +151,6 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
 }));
 
 // ===== RATE LIMITING =====
-// FIX: When mounted as app.use('/api', limiter), req.path is relative to /api.
-// Skip paths must NOT include the /api prefix.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -171,7 +172,6 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // ===== PAYSTACK WEBHOOK RAW BODY MIDDLEWARE =====
-// Must be BEFORE express.json() so Paystack signature verification gets the raw body.
 app.use('/api/billing/webhook', express.raw({
   type: 'application/json',
   limit: '1mb',
@@ -245,6 +245,7 @@ app.get('/api/health', (req, res) => {
       notifications: true,
       knowledgebase: true,
       pipelines: true,
+      support: true,
     },
     uploads: {
       directory: path.join(__dirname, '../uploads'),
@@ -258,8 +259,6 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/content', contentRoutes);
-// FIX: /api/sites maps to sitesRoutes only. wordpressRoutes gets /api/wordpress only.
-// Previously /api/sites was registered twice (wordpressRoutes then sitesRoutes), causing sitesRoutes to be partially shadowed.
 app.use('/api/wordpress', wordpressRoutes);
 app.use('/api/sites', sitesRoutes);
 app.use('/api/keywords', keywordRoutes);
@@ -271,9 +270,9 @@ app.use('/api/bulk-content', bulkContentRoutes);
 app.use('/api/knowledgebase', knowledgebaseRoutes);
 app.use('/api/pipelines', pipelineRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/support', supportRoutes);
 
 // FIX: Scraper routes moved to AFTER session and passport initialization.
-// Previously mounted before session setup, which broke any auth-protected scraper route.
 app.use('/api/scraper', scraperRoutes);
 
 // Admin routes — must come after user routes to avoid conflicts
@@ -305,6 +304,7 @@ app.get('/', (_req, res) => {
       knowledgebase: '/api/knowledgebase',
       pipelines: '/api/pipelines',
       notifications: '/api/notifications',
+      support: '/api/support',
       health: '/api/health',
       scraper: '/api/scraper',
     },
